@@ -6,6 +6,7 @@ import { BALL_R, SPHERE_R } from './config.js';
 //   pass  - flying to a teammate (target)
 //   shot  - flying at a goal
 //   loose - drifting, anyone can grab it
+// The rules live in match.js; in the tactics game this class is only the visual.
 export class Ball {
   constructor(scene) {
     this.pos = new THREE.Vector3();
@@ -103,6 +104,11 @@ export class Ball {
         if (this.state !== 'loose') this.loose(this.vel.multiplyScalar(0.5));
       }
     }
+    this.updateVisual(dt, time);
+  }
+
+  // Mesh, glow and trail only. Playback sets pos/vel/state from recorded frames and calls this.
+  updateVisual(dt, time) {
     this.mesh.position.copy(this.pos);
     this.mesh.rotation.x += this.vel.z * dt * 2;
     this.mesh.rotation.z -= this.vel.x * dt * 2;

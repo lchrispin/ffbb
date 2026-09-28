@@ -1,10 +1,19 @@
 import * as THREE from './lib.js';
-import { SPHERE_R, TEAMS, MATCH_LENGTHS, DIFFICULTY } from './config.js';
+import {
+  TEAMS, MATCH_LENGTHS, DIFFICULTY, ASSIST, SPHERE_R, sideSign,
+  defaultTactics, aiTactics, cloneTactics,
+} from './config.js';
 import { buildArena } from './arena.js';
-import { Match } from './match.js';
-import { Input } from './input.js';
+import { Match, newOrder } from './match.js';
+import { planTeam, fixOrder } from './ai.js';
+import { MatchView } from './view.js';
+import { Overlay } from './overlay.js';
+import { CameraRig } from './camera.js';
+import { PlanUI, GoalView, describeOrder } from './input.js';
 import { Hud } from './hud.js';
+import { TacticsScreen } from './tactics.js';
 import { Sound } from './audio.js';
+import { simulateMany, simulateMatch } from './selfplay.js';
 
 const canvas = document.getElementById('game');
 let renderer;
@@ -20,77 +29,69 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(62, 1, 0.1, 2000);
+const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 2000);
 const arena = buildArena(scene, [TEAMS.aurochs.color, TEAMS.goers.color]);
-
 const isTouch = matchMedia('(pointer: coarse)').matches;
 document.body.classList.toggle('touch', isTouch);
-const input = new Input(canvas, document.getElementById('touch'));
+
+const view = new MatchView(scene);
+const overlay = new Overlay(scene);
+overlay.camera = camera;
+const rig = new CameraRig(camera);
 const hud = new Hud();
 const sound = new Sound();
+const HUMAN = 0;
 
 const ui = {
   menu: document.getElementById('menu'),
   pause: document.getElementById('pause'),
   interval: document.getElementById('interval'),
-  intervalTitle: document.getElementById('interval-title'),
-  intervalScore: document.getElementById('interval-score'),
-  intervalStats: document.getElementById('interval-stats'),
-  intervalGo: document.getElementById('interval-go'),
-  intervalMenu: document.getElementById('interval-menu'),
-  mute: document.getElementById('mute'),
+  orderbar: document.getElementById('orderbar'),
+  playbar: document.getElementById('playbar'),
+  hint: document.getElementById('hint'),
+  risk: document.getElementById('risk'),
+  pbLabel: document.getElementById('pb-label'),
+  pbSpeed: document.querySelector('#pb-speed span'),
 };
 
 const settings = loadSettings();
 let match = null;
-let mode = 'attract';          // attract | play | paused | interval
-let lastEventGoalCam = 0;
+let mode = 'attract';   // attract | tactics | plan | playback | interval | paused
+let pausedFrom = null;
+let pb = null;          // current playback
+let lastRec = null;
+let speed = 1;
+let excitement = 0;
+const attract = { match: null, rec: null, t: 0 };
 
-// Camera rig: yaw/pitch describe where the controlled swimmer is looking.
-const rig = {
-  yaw: Math.PI / 2, pitch: 0, snap: null,
-  pos: new THREE.Vector3(0, 0, 40), look: new THREE.Vector3(), orbit: 0,
+const plan = new PlanUI({
+  canvas, camera, rig, overlay, view, hud,
+  onResolve: () => resolveBeat(),
+  onChange: () => refreshPanels(),
+});
+plan.goalView = new GoalView(document.getElementById('goalview'), (aim) => {
+  const u = plan.sel;
+  if (!plan.active || !plan.own(u) || !plan.isCarrier(u)) return;
+  plan.edit((o) => {
+    if (o.type !== 'shoot' && o.type !== 'tech') o.type = 'shoot';
+    o.aim = aim;
+  });
+});
+hud.onSelect = (u) => {
+  if (mode !== 'plan') return;
+  plan.select(u);
 };
-const aim = new THREE.Vector3();
-const right = new THREE.Vector3();
-const tmp = new THREE.Vector3();
-const up = new THREE.Vector3(0, 1, 0);
 
-function aimDir(out, yaw, pitch) {
-  return out.set(Math.cos(pitch) * Math.sin(yaw), Math.sin(pitch), Math.cos(pitch) * Math.cos(yaw));
-}
-
-function yawPitchTo(from, to) {
-  tmp.subVectors(to, from).normalize();
-  return { yaw: Math.atan2(tmp.x, tmp.z), pitch: Math.asin(THREE.MathUtils.clamp(tmp.y, -1, 1)) * 0.6 };
-}
-
-function wrap(a) {
-  while (a > Math.PI) a -= Math.PI * 2;
-  while (a < -Math.PI) a += Math.PI * 2;
-  return a;
-}
+const tactics = new TacticsScreen({
+  onApply: (res) => applyTactics(res),
+  onCancel: () => { if (tacticsReturn) tacticsReturn(); },
+});
+let tacticsReturn = null;
 
 // ---------- match lifecycle ----------
 
-function newMatch(opts) {
-  if (match) match.dispose();
-  match = new Match(scene, opts, onEvent);
-  arena.goals[0].setColor(match.teamDefs[0].color);
-  arena.goals[1].setColor(match.teamDefs[1].color);
-  hud.setTeams(match.teamDefs);
-  rig.yaw = Math.PI / 2;
-  rig.pitch = 0;
-}
-
-function startAttract() {
-  mode = 'attract';
-  newMatch({ teamIds: ['aurochs', 'goers'], humanTeam: 0, difficulty: 'normal', halfLength: 9999, spectate: true });
-  hud.show(false);
-  ui.menu.hidden = false;
-  ui.pause.hidden = true;
-  ui.interval.hidden = true;
-  document.body.classList.remove('playing');
+function profile(team) {
+  return team === HUMAN ? ASSIST : DIFFICULTY[match.difficulty];
 }
 
 function startMatch() {
@@ -98,105 +99,402 @@ function startMatch() {
   const pick = settings.team;
   const other = pick === 'aurochs' ? 'goers' : 'aurochs';
   const len = MATCH_LENGTHS.find((l) => l.id === settings.length) || MATCH_LENGTHS[1];
-  newMatch({ teamIds: [pick, other], humanTeam: 0, difficulty: settings.difficulty, halfLength: len.half });
-  mode = 'play';
+  const diff = settings.difficulty;
+  match = new Match({
+    teamIds: [pick, other],
+    statScales: [1, DIFFICULTY[diff].aiStat],
+    beatsPerHalf: len.beats,
+    tactics: [settings.tactics ? cloneTactics(settings.tactics) : defaultTactics(), aiTactics(diff)],
+  });
+  match.difficulty = diff;
+  lastRec = null;
+  view.attach(match);
+  overlay.setTeams(match.teamDefs);
+  arena.goals[0].setColor(match.teamDefs[0].color);
+  arena.goals[1].setColor(match.teamDefs[1].color);
+  hud.setTeams(match.teamDefs, HUMAN);
+  hud.setScore(match.score);
+  hud.logBeat(`${match.teamDefs[0].name} v ${match.teamDefs[1].name} · ${DIFFICULTY[diff].label}`);
   ui.menu.hidden = true;
   ui.interval.hidden = true;
   ui.pause.hidden = true;
   hud.show(true);
   document.body.classList.add('playing');
-  if (!isTouch) requestLock();
+  rig.mode = 'orbit';
+  rig.reset(true);
+  openTactics('prematch');
 }
 
-function requestLock() {
-  try {
-    const r = canvas.requestPointerLock?.();
-    if (r && r.catch) r.catch(() => {});
-  } catch { /* optional */ }
+function openTactics(kind) {
+  if (!match) return;
+  const prev = mode;
+  mode = 'tactics';
+  tacticsReturn = () => {
+    mode = prev === 'tactics' ? 'plan' : prev;
+    if (prev === 'interval') ui.interval.hidden = false;
+    tacticsReturn = null;
+  };
+  if (prev === 'interval') ui.interval.hidden = true;
+  tactics.open(match, HUMAN, { mode: kind, changesLeft: match.changesLeft[HUMAN] });
 }
 
-function setPaused(on) {
-  if (on && mode === 'play') {
-    mode = 'paused';
-    ui.pause.hidden = false;
-    if (document.pointerLockElement) document.exitPointerLock();
-  } else if (!on && mode === 'paused') {
-    mode = 'play';
-    ui.pause.hidden = true;
-    if (!isTouch) requestLock();
+function applyTactics({ tactics: t, subs, changed }) {
+  const kind = tactics.mode;
+  if (kind === 'inplay' && changed) match.changesLeft[HUMAN]--;
+  match.setTactics(HUMAN, cloneTactics(t));
+  for (const s of subs) {
+    const u = match.teams[HUMAN][s.slot];
+    const outName = u.name;
+    if (match.substitute(HUMAN, s.slot, s.bench)) hud.log(`Substitution: ${u.name} on for ${outName}`, 'good', match.minute());
+  }
+  view.refresh();
+  settings.tactics = cloneTactics(t);
+  saveSettings();
+  if (changed && kind === 'inplay') hud.log(`Tactics changed (${match.changesLeft[HUMAN]} changes left this half)`, 'neutral', match.minute());
+  hud.setChanges(match.changesLeft[HUMAN]);
+  tacticsReturn = null;
+  if (kind === 'prematch') {
+    // The kickoff shape follows the formation just chosen.
+    match.setupKickoff();
+    view.sync();
+    beginPlanning();
+  } else if (kind === 'halftime') {
+    mode = 'interval';
+    ui.interval.hidden = false;
+  } else {
+    // Re-plan everyone the player hasn't overridden.
+    const auto = planTeam(match, HUMAN, match.tactics[HUMAN], ASSIST);
+    const keep = plan.orders.map((o, i) => (plan.manual[i] ? o : null));
+    plan.start(match, HUMAN, auto);
+    keep.forEach((o, i) => { if (o) { plan.orders[i] = o; plan.manual[i] = true; } });
+    mode = 'plan';
+    refreshPanels();
   }
 }
 
-document.addEventListener('pointerlockchange', () => {
-  // Losing the pointer mid-match (Esc) pauses, like most desktop games.
-  if (!document.pointerLockElement && mode === 'play' && match && match.phase !== 'halftime' && match.phase !== 'fulltime') setPaused(true);
-});
+function beginPlanning() {
+  if (match.phase === 'halftime') return showInterval(false);
+  if (match.phase === 'fulltime') return showInterval(true);
+  mode = 'plan';
+  pb = null;
+  view.sync();
+  rig.mode = 'orbit';
+  rig.celebrate = null;
+  overlay.showGuides(true, 1);
+  const auto = planTeam(match, HUMAN, match.tactics[HUMAN], ASSIST);
+  plan.start(match, HUMAN, auto);
+  ui.orderbar.hidden = false;
+  ui.playbar.hidden = true;
+  ui.hint.hidden = false;
+  hud.setScore(match.score);
+  hud.setClock(match.minute(), match.half);
+  hud.setChanges(match.changesLeft[HUMAN]);
+  hud.setPhase('plan', `Planning · beat ${match.beat + 1} of ${match.beatsPerHalf}${match.kickoffPending ? ' · kickoff' : ''}`);
+  refreshPanels();
+}
+
+function refreshPanels() {
+  if (!match) return;
+  hud.renderSquad(match, plan);
+  hud.renderCard(match, plan.sel || match.teams[HUMAN][2], plan);
+}
+
+function resolveBeat() {
+  if (mode !== 'plan') return;
+  sound.start();
+  const ai = planTeam(match, 1 - HUMAN, match.tactics[1 - HUMAN], profile(1 - HUMAN));
+  const orders = HUMAN === 0 ? [plan.orders, ai] : [ai, plan.orders];
+  plan.orders.forEach((o, i) => fixOrder(match, match.teams[HUMAN][i], o));
+  const rec = match.resolveBeat(orders);
+  plan.stop();
+  lastRec = rec;
+  hud.logBeat(`${rec.minuteBefore}' · beat ${rec.beat + 1}${rec.half === 2 ? ' (2nd half)' : ''}`);
+  // The opponent's orders are revealed only now.
+  const opp = match.teams[1 - HUMAN].map((u) => `${u.name}: ${describeOrderFor(u, rec.orders[1 - HUMAN][u.slotIndex])}`);
+  hud.log(`${match.teamDefs[1 - HUMAN].short} orders · ${opp.join(' · ')}`, 'neutral');
+  startPlayback(rec, true);
+}
+
+function describeOrderFor(u, o) {
+  // Describe against the state at the start of the beat (the carrier may have changed).
+  const txt = describeOrder(match, u, o);
+  return o.type === 'hold' ? 'hold' : txt;
+}
+
+// ---------- playback ----------
+
+function startPlayback(rec, first) {
+  mode = 'playback';
+  pb = { rec, t: 0, ev: 0, first, slow: 1, slowUntil: 0, attackTeam: attackingTeam(rec, 0) };
+  view.applyFrame(rec, 0);
+  hud.setScore(rec.scoreBefore);
+  hud.clearFloaters();
+  hud.setClock(rec.minuteBefore, rec.half);
+  hud.setPhase('playback', first ? `Beat ${rec.beat + 1} · playing out` : `Replay · beat ${rec.beat + 1}`);
+  ui.orderbar.hidden = true;
+  ui.playbar.hidden = false;
+  ui.hint.hidden = true;
+  ui.risk.hidden = true;
+  ui.pbLabel.textContent = first ? `Beat ${rec.beat + 1} of ${match.beatsPerHalf}` : 'Replay';
+  rig.mode = 'director';
+  rig.celebrate = null;
+  rig.wide(view.ball.pos, pb.attackTeam);
+  overlay.showGuides(true, 0.45);
+}
+
+// Which side the play is going toward: whoever holds (or last touched) the ball.
+function attackingTeam(rec, t) {
+  const f = rec.frames[Math.min(rec.frames.length - 1, Math.floor(t / (1 / 30)))];
+  const owner = f[100];
+  if (owner >= 0) return owner < 6 ? 0 : 1;
+  return f[96] > 0 ? 0 : 1;
+}
+
+function fire(e, live) {
+  const tone = hud.tone(e.team);
+  const minute = e.type === 'halftime' || e.type === 'fulltime' ? pb.rec.half * 45 : pb.rec.minuteBefore;
+  if (pb.first) hud.log(e.text, tone, minute, !!e.big);
+  if (!live) return;
+  const shooter = e.ids && e.ids.length ? view.players[e.ids[0]] : null;
+  switch (e.type) {
+    case 'launch':
+      hud.callout('Kickoff', 'The ball launches from the floor of the sphere', 'neutral', 1.6);
+      sound.whistle();
+      break;
+    case 'pass':
+      sound.bubbles(3);
+      break;
+    case 'shot':
+    case 'tech':
+      sound.thump(e.type === 'tech' ? 1.6 : 1, e.type === 'tech' ? 0.6 : 1);
+      if (shooter) rig.shotCam(shooter.pos, shooter.team);
+      pb.slow = 0.35;
+      pb.slowUntil = e.t + 1.6;
+      if (e.type === 'tech') hud.callout('Jecht Shot', e.text.replace('JECHT SHOT! ', ''), tone, 1.6);
+      excitement = Math.max(excitement, 0.5);
+      break;
+    case 'goal': {
+      const scorer = e.team;
+      arena.goals[scorer === 0 ? 1 : 0].flash();
+      sound.chime(scorer === HUMAN);
+      sound.thump(1.4, 0.5);
+      sound.whistle(true);
+      const [a, b] = match.teamDefs;
+      const sc = [...pb.rec.scoreAfter];
+      hud.setScore(sc);
+      hud.callout('Goal!', `${e.text.replace(/^GOAL! /, '').split(' · ')[0]} · ${a.short} ${sc[0]}–${sc[1]} ${b.short}`, tone, 3);
+      rig.startCelebration(new THREE.Vector3(...e.pos));
+      pb.slow = 0.6;
+      pb.slowUntil = e.t + 3;
+      excitement = 1;
+      break;
+    }
+    case 'save':
+    case 'beaten':
+    case 'block':
+    case 'deflect':
+    case 'intercept':
+    case 'tackle':
+    case 'breakthrough':
+    case 'knockback':
+    case 'wide':
+    case 'fizzle':
+      if (e.pos) hud.floater(e.text, e.pos, tone, 2.6);
+      if (e.type === 'save' || e.type === 'block' || e.type === 'intercept' || e.type === 'tackle') sound.thump(0.7, 1.3);
+      if (['save', 'block', 'wide', 'fizzle', 'intercept'].includes(e.type) && pb.slowUntil > e.t) pb.slowUntil = e.t + 0.5;
+      if (e.type === 'save') excitement = Math.max(excitement, 0.6);
+      break;
+    case 'overdrive':
+      hud.callout('Jecht Shot ready', match.teamDefs[e.team].name, tone, 1.4);
+      break;
+    case 'halftime':
+    case 'fulltime':
+      sound.whistle(true);
+      break;
+  }
+}
+
+function updatePlayback(dt) {
+  const rec = pb.rec;
+  if (pb.slowUntil && pb.t > pb.slowUntil) { pb.slow = 1; pb.slowUntil = 0; }
+  pb.t += dt * speed * pb.slow;
+  const events = rec.events;
+  while (pb.ev < events.length && events[pb.ev].t <= pb.t) fire(events[pb.ev++], true);
+  const st = view.applyFrame(rec, pb.t);
+  if (st.owner >= 0) pb.attackTeam = st.owner < 6 ? 0 : 1;
+  rig.direct(dt, view.ball.pos, pb.attackTeam);
+  // Both sides' orders, drawn faintly now that they are revealed.
+  overlay.clear();
+  if (pb.t < 1.2) {
+    rec.orders.forEach((os, team) => os.forEach((o, i) => {
+      const from = rec.start[team * 6 + i];
+      if (o.target) overlay.beam(from, o.target, '#' + new THREE.Color(match.teamDefs[team].color).getHexString(), 0.04, 0.5 * (1 - pb.t / 1.2));
+    }));
+  }
+  if (pb.t >= rec.duration + 0.35) finishPlayback();
+}
+
+function skipPlayback() {
+  if (!pb) return;
+  while (pb.ev < pb.rec.events.length) fire(pb.rec.events[pb.ev++], false);
+  hud.setScore(pb.rec.scoreAfter);
+  finishPlayback();
+}
+
+// After a first showing or a replay, go back to planning (or to the interval screen).
+function finishPlayback() {
+  pb = null;
+  hud.clearFloaters();
+  beginPlanning();
+}
+
+// ---------- interval ----------
 
 function showInterval(final) {
   mode = 'interval';
-  if (document.pointerLockElement) document.exitPointerLock();
+  plan.stop();
+  hud.setClock(final ? 90 : 45, match.half);
+  hud.setScore(match.score);
+  hud.setPhase('plan', final ? 'Full time' : 'Half time');
+  ui.orderbar.hidden = true;
+  ui.playbar.hidden = true;
+  ui.hint.hidden = true;
+  rig.mode = 'orbit';
+  rig.reset();
   const [a, b] = match.teamDefs;
   const [sa, sb] = match.score;
   let title = 'Half time';
   if (final) title = sa > sb ? `${a.name} win` : sa < sb ? `${b.name} win` : 'Full time · Draw';
-  ui.intervalTitle.textContent = title;
-  ui.intervalScore.innerHTML = `<span>${a.short}</span><b>${sa}</b><i>–</i><b>${sb}</b><span>${b.short}</span>`;
+  document.getElementById('interval-title').textContent = title;
+  document.getElementById('interval-score').innerHTML = `<span>${a.short}</span><b>${sa}</b><i>–</i><b>${sb}</b><span>${b.short}</span>`;
+  const goals = match.history.filter((h) => h.type === 'goal').map((h) => `${h.minute}' ${h.text.replace(/^GOAL! /, '').split(' · ')[0]}`);
+  document.getElementById('interval-scorers').textContent = goals.length ? goals.join(' · ') : 'No goals yet';
   const st = match.stats;
   const total = Math.max(1, st[0].possession + st[1].possession);
+  const pctPoss = (t) => `${Math.round((st[t].possession / total) * 100)}%`;
   const rows = [
-    ['Possession', `${Math.round((st[0].possession / total) * 100)}%`, `${Math.round((st[1].possession / total) * 100)}%`],
+    ['Possession', pctPoss(0), pctPoss(1)],
     ['Shots', st[0].shots, st[1].shots],
-    ['Passes completed', st[0].passes, st[1].passes],
-    ['Tackles won', st[0].tackles, st[1].tackles],
-    ['Blocks & interceptions', st[0].blocks, st[1].blocks],
+    ['On target', st[0].onTarget, st[1].onTarget],
     ['Keeper saves', st[0].saves, st[1].saves],
+    ['Shots blocked', st[0].blocks, st[1].blocks],
+    ['Shot deflections', st[0].deflects, st[1].deflects],
+    ['Interceptions', st[0].intercepts, st[1].intercepts],
+    ['Tackles won', st[0].tackles, st[1].tackles],
+    ['Passes completed', `${st[0].passes}/${st[0].passAtt}`, `${st[1].passes}/${st[1].passAtt}`],
   ];
-  ui.intervalStats.innerHTML = rows.map(([k, x, y]) => `<tr><td>${x}</td><th>${k}</th><td>${y}</td></tr>`).join('');
-  ui.intervalGo.textContent = final ? 'Rematch' : 'Start 2nd half';
+  document.getElementById('interval-stats').innerHTML = rows.map(([k, x, y]) => `<tr><td>${x}</td><th>${k}</th><td>${y}</td></tr>`).join('');
+  document.getElementById('interval-go').textContent = final ? 'Rematch' : 'Start 2nd half';
+  document.getElementById('interval-tac').hidden = final;
   ui.interval.hidden = false;
-  ui.intervalGo.focus();
+  document.getElementById('interval-go').focus();
+  sound.crowd(0.4);
 }
 
-ui.intervalGo.addEventListener('click', () => {
+document.getElementById('interval-go').addEventListener('click', () => {
   sound.start();
-  if (match.phase === 'fulltime') { startMatch(); return; }
   ui.interval.hidden = true;
+  if (match.phase === 'fulltime') { startMatch(); return; }
   match.startSecondHalf();
-  mode = 'play';
-  if (!isTouch) requestLock();
+  hud.logBeat('Second half');
+  view.sync();
+  beginPlanning();
 });
-ui.intervalMenu.addEventListener('click', startAttract);
+document.getElementById('interval-tac').addEventListener('click', () => openTactics('halftime'));
+document.getElementById('interval-menu').addEventListener('click', () => startAttract());
+
+// ---------- buttons ----------
+
+document.getElementById('tac-btn').addEventListener('click', () => { if (mode === 'plan') openTactics('inplay'); });
+document.getElementById('view-btn').addEventListener('click', () => rig.reset());
+document.getElementById('replay-btn').addEventListener('click', () => replay());
+document.getElementById('focus-btn').addEventListener('click', () => toggleFocus());
+document.getElementById('log-btn').addEventListener('click', () => document.getElementById('logpanel').classList.toggle('open'));
+document.getElementById('menu-btn').addEventListener('click', () => setPaused(true));
 document.getElementById('resume').addEventListener('click', () => setPaused(false));
-document.getElementById('quit').addEventListener('click', startAttract);
-document.getElementById('pause-btn').addEventListener('click', () => setPaused(true));
-ui.mute.addEventListener('click', () => { sound.start(); updateMute(sound.toggleMute()); });
+document.getElementById('quit').addEventListener('click', () => startAttract());
+document.getElementById('pb-replay').addEventListener('click', () => replay());
+document.getElementById('pb-speed').addEventListener('click', () => cycleSpeed());
+document.getElementById('pb-skip').addEventListener('click', () => skipPlayback());
+for (const id of ['mute', 'mute2']) {
+  document.getElementById(id).addEventListener('click', () => { sound.start(); updateMute(sound.toggleMute()); });
+}
 function updateMute(m) {
-  ui.mute.setAttribute('aria-pressed', String(m));
-  ui.mute.textContent = m ? 'Sound off' : 'Sound on';
+  for (const id of ['mute', 'mute2']) {
+    const b = document.getElementById(id);
+    b.setAttribute('aria-pressed', String(m));
+    b.textContent = m ? 'Sound off' : 'Sound on';
+  }
 }
 
-// ---------- menu ----------
+function toggleFocus() {
+  if (rig.follow) { rig.focusOn(null); rig.goal.target.set(0, -2, 0); return; }
+  const u = plan.sel;
+  if (u) rig.focusOn(() => view.players[u.id].pos);
+}
+
+function replay() {
+  if (!lastRec || (mode !== 'plan' && mode !== 'playback')) return;
+  if (mode === 'plan') plan.stop();
+  startPlayback(lastRec, false);
+}
+
+function cycleSpeed() {
+  speed = speed === 1 ? 2 : speed === 2 ? 0.5 : 1;
+  ui.pbSpeed.textContent = `${speed}×`;
+}
+
+function setPaused(on) {
+  if (on && mode !== 'paused' && mode !== 'attract') {
+    pausedFrom = mode;
+    mode = 'paused';
+    ui.pause.hidden = false;
+  } else if (!on && mode === 'paused') {
+    mode = pausedFrom;
+    ui.pause.hidden = true;
+  }
+}
+
+addEventListener('keydown', (e) => {
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+  if (e.code === 'KeyN' && !e.repeat) { sound.start(); updateMute(sound.toggleMute()); return; }
+  if (mode === 'paused' && e.code === 'Escape') { setPaused(false); return; }
+  if (mode === 'playback') {
+    if (e.code === 'Space' || e.code === 'Enter') { e.preventDefault(); skipPlayback(); }
+    if (e.code === 'KeyR') replay();
+    if (e.code === 'KeyX') cycleSpeed();
+    if (e.code === 'Escape') setPaused(true);
+    return;
+  }
+  if (mode !== 'plan') return;
+  if (e.code === 'KeyR') replay();
+  if (e.code === 'KeyO') openTactics('inplay');
+  if (e.code === 'KeyC') rig.reset();
+  if (e.code === 'KeyF') toggleFocus();
+  if (e.code === 'Escape' && !plan.armed) setPaused(true);
+});
+
+// ---------- menu and attract mode ----------
 
 function loadSettings() {
-  const d = { team: 'aurochs', difficulty: 'normal', length: 'std' };
+  const d = { team: 'aurochs', difficulty: 'normal', length: 'std', tactics: null };
   try {
-    return { ...d, ...JSON.parse(localStorage.getItem('ffbb.settings') || '{}') };
+    return { ...d, ...JSON.parse(localStorage.getItem('ffbb.tactics.settings') || '{}') };
   } catch { return d; }
 }
 function saveSettings() {
-  try { localStorage.setItem('ffbb.settings', JSON.stringify(settings)); } catch { /* storage is optional */ }
+  try { localStorage.setItem('ffbb.tactics.settings', JSON.stringify(settings)); } catch { /* storage is optional */ }
 }
 
 function bindChoice(name, key) {
-  const inputs = document.querySelectorAll(`input[name="${name}"]`);
-  inputs.forEach((el) => {
+  document.querySelectorAll(`input[name="${name}"]`).forEach((el) => {
     el.checked = el.value === settings[key];
     el.addEventListener('change', () => { settings[key] = el.value; saveSettings(); });
   });
 }
+
 function buildMenu() {
-  const teamWrap = document.getElementById('team-options');
-  teamWrap.innerHTML = Object.values(TEAMS).map((t) => {
+  document.getElementById('team-options').innerHTML = Object.values(TEAMS).map((t) => {
     const avg = (k) => Math.round(t.players.filter((p) => p.role !== 'GK').reduce((s, p) => s + p[k], 0) / 5);
     const bar = (k, label) => `<div class="tbar"><span>${label}</span><i style="--v:${avg(k) / 15}"></i></div>`;
     const star = t.players.find((p) => p.role === 'MF');
@@ -218,243 +516,135 @@ function buildMenu() {
   document.getElementById('start').addEventListener('click', startMatch);
 }
 
-// ---------- events from the match ----------
-
-function onEvent(type, d) {
-  if (!match || mode === 'attract') {
-    if (type === 'goal') arena.goals[d.team === 0 ? 1 : 0].flash();
-    return;
-  }
-  const mine = (team) => team === match.humanTeam;
-  switch (type) {
-    case 'kickoff':
-      hud.callout(d.half === 1 ? '1st half' : '2nd half', 'Ball launches from the floor of the sphere', 'neutral', 2.2);
-      rig.snap = null;
-      rig.yaw = Math.PI / 2;
-      rig.pitch = 0;
-      rig.cut = true;
-      break;
-    case 'whistle':
-      sound.whistle(d.long);
-      break;
-    case 'pass':
-      sound.bubbles(3);
-      break;
-    case 'shot':
-      sound.thump(d.special ? 1.6 : 1, d.special ? 0.6 : 1);
-      if (d.special) {
-        hud.callout('Jecht Shot', `${d.from.name} · power ${Math.round(d.power)}`, mine(d.from.team) ? 'good' : 'bad', 1.6);
-        match.excitement = Math.max(match.excitement, 0.7);
-      }
-      hud.log(`${d.from.name} shoots · power ${Math.round(d.power)}`, mine(d.from.team) ? 'good' : 'bad');
-      break;
-    case 'goal': {
-      arena.goals[d.team === 0 ? 1 : 0].flash();
-      sound.chime(mine(d.team));
-      sound.thump(1.4, 0.5);
-      const who = d.by ? (d.ownGoal ? `Own goal · ${d.by.name}` : d.by.name) : '';
-      hud.callout('Goal!', `${match.teamDefs[d.team].name} · ${who}`, mine(d.team) ? 'good' : 'bad', 3.2);
-      hud.log(`Goal for ${match.teamDefs[d.team].short} · ${who}`, mine(d.team) ? 'good' : 'bad');
-      lastEventGoalCam = 3.4;
-      rig.goalFocus = d.by || null;
-      break;
-    }
-    case 'save':
-      sound.thump(0.8, 1.4);
-      hud.callout('Save', `${d.keeper.name} · grip ${d.grip} beats power ${d.power}`, mine(d.keeper.team) ? 'good' : 'bad', 1.4);
-      hud.log(`${d.keeper.name} saves (${d.grip} vs ${d.power})`, mine(d.keeper.team) ? 'good' : 'bad');
-      break;
-    case 'beaten':
-      hud.log(`${d.keeper.name} beaten · ${d.power} past grip ${d.grip}`, mine(d.keeper.team) ? 'bad' : 'good');
-      break;
-    case 'block':
-    case 'intercept':
-      sound.thump(0.6, 1.6);
-      hud.callout(type === 'block' ? 'Blocked' : 'Intercepted', d.by.name, mine(d.by.team) ? 'good' : 'bad', 1.1);
-      hud.log(`${d.by.name} ${type === 'block' ? 'blocks the shot' : 'intercepts'}`, mine(d.by.team) ? 'good' : 'bad');
-      break;
-    case 'deflect':
-      hud.log(`${d.by.name} gets a touch · −${d.cut}, ${d.left} left`, mine(d.by.team) ? 'good' : 'bad');
-      break;
-    case 'knockback':
-      hud.log(`${d.on.name} is knocked aside`, mine(d.on.team) ? 'bad' : 'good');
-      break;
-    case 'fizzle':
-      hud.log('The shot runs out of power');
-      break;
-    case 'tackle':
-      sound.thump(0.9, 0.8);
-      hud.callout('Tackle', `${d.by.name} on ${d.on.name}`, mine(d.by.team) ? 'good' : 'bad', 1.1);
-      hud.log(`${d.by.name} wins it from ${d.on.name}`, mine(d.by.team) ? 'good' : 'bad');
-      break;
-    case 'breakthrough':
-      hud.log(`${d.by.name} breaks the tackle`, mine(d.by.team) ? 'good' : 'bad');
-      break;
-    case 'overdrive':
-      if (mine(d.team)) hud.log(isTouch ? 'Jecht Shot ready' : 'Jecht Shot ready · press E with the ball', 'good');
-      else hud.log(`${match.teamDefs[d.team].short} have a Jecht Shot charged`, 'bad');
-      break;
-    case 'possession':
-      if (d.player.team === match.humanTeam && d.player === match.human) {
-        rig.snap = yawPitchTo(d.player.pos, match.attackGoal(match.humanTeam));
-      }
-      break;
-    case 'halftime':
-      setTimeout(() => showInterval(false), 1200);
-      break;
-    case 'fulltime':
-      setTimeout(() => showInterval(true), 1200);
-      break;
-  }
+// Behind the menu, the two clubs play each other on autopilot.
+function startAttract() {
+  mode = 'attract';
+  plan.stop();
+  pb = null;
+  match = null;
+  ui.menu.hidden = false;
+  ui.pause.hidden = true;
+  ui.interval.hidden = true;
+  document.getElementById('tactics').hidden = true;
+  hud.show(false);
+  document.body.classList.remove('playing');
+  const m = new Match({ teamIds: ['aurochs', 'goers'], beatsPerHalf: 9999, tactics: [aiTactics('normal'), aiTactics('hard')] });
+  attract.match = m;
+  attract.rec = null;
+  view.attach(m);
+  overlay.setTeams(m.teamDefs);
+  overlay.showGuides(false);
+  arena.goals[0].setColor(m.teamDefs[0].color);
+  arena.goals[1].setColor(m.teamDefs[1].color);
+  rig.mode = 'director';
+  rig.celebrate = null;
+  rig.wide(view.ball.pos, 0);
 }
 
-// ---------- per-frame ----------
-
-function controlHuman(dt) {
-  const h = match.human;
-  const look = input.consumeLook();
-  const kl = input.keyLook(dt);
-  const sens = 0.0028;
-  rig.yaw -= look.dx * sens + kl.yaw;
-  rig.pitch -= look.dy * sens - kl.pitch;
-  if (look.dx || look.dy || kl.yaw || kl.pitch) rig.snap = null;
-  if (rig.snap) {
-    rig.yaw += wrap(rig.snap.yaw - rig.yaw) * Math.min(1, dt * 6);
-    rig.pitch += (rig.snap.pitch - rig.pitch) * Math.min(1, dt * 6);
-    if (Math.abs(wrap(rig.snap.yaw - rig.yaw)) < 0.01) rig.snap = null;
+function updateAttract(dt) {
+  const a = attract;
+  if (!a.rec || a.t >= a.rec.duration + 0.3) {
+    const m = a.match;
+    a.rec = m.resolveBeat([0, 1].map((t) => planTeam(m, t, m.tactics[t], DIFFICULTY.normal)));
+    a.t = 0;
+    rig.celebrate = null;
   }
-  rig.pitch = THREE.MathUtils.clamp(rig.pitch, -1.3, 1.3);
-
-  const actions = input.consumeActions();
-  for (const a of actions) {
-    if (a === 'pause') { setPaused(true); return; }
-    if (a === 'mute') updateMute(sound.toggleMute());
+  const prev = a.t;
+  a.t += dt;
+  for (const e of a.rec.events) {
+    if (e.t > prev && e.t <= a.t && e.type === 'goal') arena.goals[e.team === 0 ? 1 : 0].flash();
   }
-  if (!h || match.phase !== 'play') {
-    if (h) h.desired.set(0, 0, 0);
-    return;
-  }
-
-  aimDir(aim, rig.yaw, rig.pitch);
-  right.set(-Math.cos(rig.yaw), 0, Math.sin(rig.yaw));
-  const mv = input.move();
-  h.desired.set(0, 0, 0)
-    .addScaledVector(aim, mv.z)
-    .addScaledVector(right, mv.x)
-    .addScaledVector(up, mv.y);
-  if (h.desired.lengthSq() > 1) h.desired.normalize();
-  h.sprint = input.sprinting();
-  h.aimHint = aim;
-
-  // Strafing with no manual look input slowly swings the camera round, so A/D
-  // (or the touch stick) work as steering for keyboard-only and phone players.
-  const idleLook = performance.now() - input.lastLookInput > 700;
-  const horiz = Math.hypot(h.vel.x, h.vel.z);
-  if (idleLook && Math.abs(mv.x) > 0.1 && horiz > 1.5) {
-    const target = Math.atan2(h.vel.x, h.vel.z);
-    rig.yaw += wrap(target - rig.yaw) * Math.min(1, dt * 1.4 * Math.abs(mv.x));
-  }
-  if (match.ball.owner === h && h.desired.lengthSq() < 0.01) h.facing.lerp(aim, Math.min(1, dt * 5)).normalize();
-
-  const hasBall = match.ball.owner === h;
-  for (const a of actions) {
-    switch (a) {
-      case 'pass':
-        if (hasBall) match.pass(h, match.passTarget);
-        else match.tackle(h);
-        break;
-      case 'shoot':
-        if (hasBall) match.shoot(h, false);
-        else match.switchHuman();
-        break;
-      case 'special':
-        if (hasBall && match.overdrive[h.team] >= 1) match.shoot(h, true);
-        break;
-      case 'switch':
-        match.switchHuman();
-        break;
-      case 'face':
-        rig.snap = hasBall ? yawPitchTo(h.pos, match.attackGoal(h.team)) : yawPitchTo(h.pos, match.ball.pos);
-        break;
-    }
-  }
+  const st = view.applyFrame(a.rec, a.t);
+  rig.direct(dt, view.ball.pos, st.owner >= 0 ? (st.owner < 6 ? 0 : 1) : null);
 }
 
-function updateCamera(dt, time) {
-  let target;
-  let desired;
-  const ease = 1 - Math.exp(-dt * 7);
-  if (mode === 'attract' || mode === 'interval' || !match.human) {
-    // Slow orbit outside the sphere to show off the pool.
-    rig.orbit += dt * 0.08;
-    desired = tmp.set(Math.cos(rig.orbit) * 58, 14 + Math.sin(rig.orbit * 0.7) * 8, Math.sin(rig.orbit) * 58);
-    target = new THREE.Vector3(0, -2, 0);
-  } else if (lastEventGoalCam > 0 && match.phase === 'goal') {
-    // Goal replay-ish angle: circle the scorer.
-    const focus = rig.goalFocus ? rig.goalFocus.pos : match.ball.pos;
-    const a = time * 0.9;
-    desired = tmp.set(Math.cos(a) * 7, 2.5, Math.sin(a) * 7).add(focus);
-    target = focus.clone();
-  } else {
-    const h = match.human;
-    aimDir(aim, rig.yaw, rig.pitch);
-    desired = tmp.copy(h.pos).addScaledVector(aim, -6.2).addScaledVector(up, 1.5);
-    target = h.pos.clone().addScaledVector(aim, 6);
-  }
-  const lim = SPHERE_R - 0.7;
-  const outside = mode === 'attract' || mode === 'interval' || !match.human;
-  if (!outside && desired.length() > lim) desired.setLength(lim);
-  if (rig.cut) {
-    rig.cut = false;
-    rig.pos.copy(desired);
-    rig.look.copy(target);
-  }
-  rig.pos.lerp(desired, ease);
-  rig.look.lerp(target, ease);
-  camera.position.copy(rig.pos);
-  camera.lookAt(rig.look);
-}
+// ---------- per frame ----------
 
 function resize() {
   const w = window.innerWidth;
   const h = window.innerHeight;
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
-  camera.fov = w < h ? 78 : 62;
+  camera.fov = w < h ? 72 : 55;
   camera.updateProjectionMatrix();
 }
 addEventListener('resize', resize);
 
 const clock = new THREE.Clock();
 let elapsed = 0;
+const positions = { players: [], ball: null, sel: -1 };
+
 function frame() {
   const dt = Math.min(0.05, clock.getDelta());
   elapsed += dt;
-  lastEventGoalCam = Math.max(0, lastEventGoalCam - dt);
+  excitement = Math.max(0, excitement - dt * 0.2);
 
-  if (mode === 'play') controlHuman(dt);
-  else {
-    const acts = input.consumeActions();
-    input.consumeLook();
-    if (mode === 'paused' && acts.includes('pause')) setPaused(false);
+  if (mode === 'attract') updateAttract(dt);
+  else if (mode === 'playback') updatePlayback(dt);
+
+  if (mode === 'plan' || mode === 'tactics' || mode === 'interval' || (mode === 'paused' && pausedFrom === 'plan')) {
+    rig.update(dt);
+    if (mode === 'plan') {
+      overlay.clear();
+      plan.frame();
+    }
   }
-
-  if (mode !== 'paused') match.update(dt);
-  arena.update(dt, elapsed, camera, match.excitement);
-  if (mode !== 'attract') sound.crowd(match.excitement);
-  for (const p of match.players) p.updateVisual(dt, elapsed, camera);
-  updateCamera(dt, elapsed);
-  if (mode === 'play' || mode === 'paused') hud.update(dt, match, isTouch);
+  const showDrops = mode !== 'attract';
+  const m = match || attract.match;
+  if (m) {
+    positions.players = view.players.map((p) => p.pos);
+    positions.ball = view.ball.pos;
+    positions.sel = plan.sel ? plan.sel.id : -1;
+    overlay.updateDrops(positions.players, m.units.map((u) => u.team), showDrops, mode === 'playback' ? 0.25 : 0.8);
+  }
+  arena.update(dt, elapsed, camera, excitement);
+  if (mode !== 'attract') sound.crowd(excitement);
+  view.update(dt, elapsed, camera);
+  // Keep name labels readable from a distance.
+  for (const p of view.players) {
+    const k = THREE.MathUtils.clamp(camera.position.distanceTo(p.pos) * 0.05, 1, 3.4);
+    p.label.scale.setScalar(k);
+    p.label.position.y = 1.1 + 0.3 * k;
+  }
+  for (const p of view.players) p.marker.visible = mode === 'plan' && plan.sel && p === view.players[plan.sel.id];
+  if (match && mode !== 'attract') hud.update(dt, camera, positions, match);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
 
-// Handy for poking at a running match from the dev console.
-window.ffbb = { get match() { return match; }, scene, camera };
+// ---------- debug handle ----------
+
+const v3 = (a) => (a ? new THREE.Vector3(...a) : null);
+function unitAt(slot) { return match.teams[HUMAN][slot]; }
+window.ffbb = {
+  get match() { return match; },
+  get mode() { return mode; },
+  get plan() { return plan; },
+  get lastRec() { return lastRec; },
+  scene, camera, rig, view, overlay,
+  startMatch(opts = {}) { Object.assign(settings, opts); startMatch(); },
+  kickoff() { if (mode === 'tactics') document.getElementById('tac-apply').click(); },
+  select(slot) { plan.select(unitAt(slot)); },
+  carrierSlot() { const o = match.ball.owner; return o && o.team === HUMAN ? o.slotIndex : -1; },
+  order(slot, o) { plan.setOrder(unitAt(slot), newOrder(o.type, { ...o, target: v3(o.target), point: v3(o.point) })); },
+  move(slot, target, sprint = false) { this.order(slot, { type: 'move', target, sprint }); },
+  pass(slot, toSlot, timing = 'start', target = null) { this.order(slot, { type: 'pass', passTo: unitAt(toSlot).id, timing, target }); },
+  through(slot, point) { this.order(slot, { type: 'through', point }); },
+  shoot(slot, aim = { y: 0, z: 0 }, timing = 'start', target = null) { this.order(slot, { type: 'shoot', aim, timing, target }); },
+  command(cmd) { plan.command(cmd); },
+  resolve() { resolveBeat(); },
+  skip() { skipPlayback(); },
+  replay() { replay(); },
+  openTactics() { openTactics('inplay'); },
+  simulate(n = 6, opts = {}) { return simulateMany(n, opts); },
+  simulateMatch,
+  sideSign,
+  SPHERE_R,
+};
 
 buildMenu();
 updateMute(false);
-startAttract();
 resize();
+startAttract();
 requestAnimationFrame(frame);
 document.body.classList.add('ready');

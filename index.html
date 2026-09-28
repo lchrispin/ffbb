@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>FFBB Blitzball</title>
+<title>FFBB Tactics</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Marcellus+SC&family=Barlow+Semi+Condensed:wght@400;500;600;700&display=swap">
@@ -12,7 +12,8 @@
     color-scheme: dark;
     --abyss: #031019;
     --deep: #072638;
-    --panel: rgba(4, 22, 34, 0.78);
+    --panel: rgba(4, 22, 34, 0.8);
+    --panel-solid: rgba(4, 22, 34, 0.94);
     --panel-edge: rgba(126, 226, 246, 0.28);
     --tide: #3fd0e8;
     --foam: #e6f6f9;
@@ -22,6 +23,8 @@
     --ember: #ff7a3a;
     --good: #67e6a4;
     --bad: #ff6b5e;
+    --home: #f3c42f;
+    --away: #d8413a;
     --display: 'Marcellus SC', 'Trajan Pro', Georgia, serif;
     --ui: 'Barlow Semi Condensed', 'Arial Narrow', 'Roboto Condensed', sans-serif;
   }
@@ -40,8 +43,8 @@
   [hidden] { display: none !important; }
   button { font: inherit; color: inherit; }
   kbd {
-    font: 600 12px/1 var(--ui);
-    padding: 3px 5px;
+    font: 600 11px/1 var(--ui);
+    padding: 2px 4px;
     border: 1px solid var(--panel-edge);
     border-bottom-width: 2px;
     border-radius: 4px;
@@ -59,13 +62,13 @@
     overflow-y: auto;
     z-index: 10;
   }
-  .overlay.center { justify-content: center; background: rgba(2, 10, 16, 0.55); }
+  .overlay.center { justify-content: center; background: rgba(2, 10, 16, 0.6); }
   #menu { background: linear-gradient(90deg, rgba(3, 16, 25, 0.92) 0%, rgba(3, 16, 25, 0.7) 45%, rgba(3, 16, 25, 0) 75%); }
   .menu-inner {
-    width: min(460px, 100%);
+    width: min(470px, 100%);
     margin-left: clamp(0px, 6vw, 90px);
     margin-block: auto;
-    display: grid; gap: 22px;
+    display: grid; gap: 20px;
   }
   .eyebrow {
     font: 600 12px/1 var(--ui); letter-spacing: 0.24em; text-transform: uppercase; color: var(--tide);
@@ -73,7 +76,7 @@
   }
   .eyebrow::after { content: ''; height: 1px; flex: 1; background: linear-gradient(90deg, var(--panel-edge), transparent); }
   h1 {
-    font: 400 clamp(46px, 11vw, 84px)/0.9 var(--display);
+    font: 400 clamp(44px, 10vw, 80px)/0.9 var(--display);
     margin: 0;
     letter-spacing: 0.01em;
     background: linear-gradient(180deg, #fff3cf 0%, var(--gold) 55%, var(--gold-deep) 100%);
@@ -82,7 +85,7 @@
     text-wrap: balance;
   }
   .gl-error { margin: 0; padding: 12px 14px; border: 1px solid var(--bad); border-radius: 4px; background: var(--panel); }
-  .lede { margin: 6px 0 0; color: var(--mist); max-width: 40ch; font-size: 16px; }
+  .lede { margin: 6px 0 0; color: var(--mist); max-width: 44ch; font-size: 16px; }
   fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 10px; min-width: 0; }
   legend { font: 600 12px/1 var(--ui); letter-spacing: 0.18em; text-transform: uppercase; color: var(--mist); margin-bottom: 10px; padding: 0; }
   #team-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -111,13 +114,14 @@
   .seg input:focus-visible + span { outline: 2px solid var(--gold); outline-offset: 2px; }
   .btn {
     appearance: none; border: 1px solid var(--panel-edge); background: var(--panel);
-    padding: 11px 18px; border-radius: 4px; cursor: pointer; font-weight: 600; letter-spacing: 0.04em;
+    padding: 10px 16px; border-radius: 4px; cursor: pointer; font-weight: 600; letter-spacing: 0.04em;
   }
   .btn.primary {
     background: linear-gradient(180deg, #f6cf6c, var(--gold) 60%, #c68e25);
     color: #241500; border-color: #f6cf6c; font: 400 20px/1 var(--display); padding: 14px 28px; letter-spacing: 0.06em;
   }
-  .btn:hover { filter: brightness(1.08); }
+  .btn:hover:not(:disabled) { filter: brightness(1.12); }
+  .btn:disabled { opacity: 0.35; cursor: default; }
   .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
   .controls-list {
     display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; font-size: 14px; color: var(--mist); align-items: center;
@@ -129,6 +133,12 @@
 
   /* ---------- HUD ---------- */
   #hud { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
+  #hud .panel, #hud button, #hud canvas.interactive, #hud .scroll { pointer-events: auto; }
+  .panel { background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 6px; backdrop-filter: blur(3px); }
+  .panel h3 {
+    margin: 0; font: 600 11px/1 var(--ui); letter-spacing: 0.18em; text-transform: uppercase; color: var(--mist);
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  }
   .scoreboard {
     position: absolute; top: calc(10px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%);
     display: grid; grid-template-columns: 1fr auto 1fr; align-items: stretch;
@@ -139,44 +149,57 @@
   #sb-away { flex-direction: row-reverse; }
   .sb-swatch { width: 8px; align-self: stretch; border-radius: 2px; }
   .sb-score { font: 400 26px/1 var(--display); min-width: 1ch; text-align: center; }
-  .sb-mid { display: grid; place-items: center; padding: 4px 14px; background: rgba(126, 226, 246, 0.08); border-inline: 1px solid var(--panel-edge); }
+  .sb-mid { display: grid; place-items: center; padding: 4px 14px; background: rgba(126, 226, 246, 0.08); border-inline: 1px solid var(--panel-edge); min-width: 104px; }
   #sb-clock { font: 700 20px/1 var(--ui); }
   #sb-half { white-space: nowrap; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--mist); }
+  #phase-tag {
+    position: absolute; top: calc(62px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%);
+    font: 600 12px/1 var(--ui); letter-spacing: 0.2em; text-transform: uppercase; padding: 5px 10px; border-radius: 3px;
+    background: rgba(63, 208, 232, 0.16); color: var(--tide); border: 1px solid rgba(63, 208, 232, 0.4); white-space: nowrap;
+  }
+  #phase-tag[data-phase="playback"] { background: rgba(232, 182, 74, 0.16); color: var(--gold); border-color: rgba(232, 182, 74, 0.45); }
 
-  #radar {
-    position: absolute; top: calc(10px + env(safe-area-inset-top, 0px)); right: 16px;
-    width: 132px; height: 132px;
-  }
-  #ticker {
-    position: absolute; top: calc(10px + env(safe-area-inset-top, 0px)); left: 16px; margin: 0; padding: 0; list-style: none;
-    display: grid; gap: 4px; max-width: min(300px, 38vw);
-  }
-  #ticker li {
-    background: var(--panel); border-left: 3px solid var(--mist); padding: 5px 9px; border-radius: 0 4px 4px 0;
-    font-size: 13px; transition: opacity 1s; font-variant-numeric: tabular-nums;
-  }
-  #ticker li[data-tone="good"] { border-left-color: var(--good); }
-  #ticker li[data-tone="bad"] { border-left-color: var(--bad); }
-  #ticker li.old { opacity: 0.35; }
+  .topright { position: absolute; top: calc(10px + env(safe-area-inset-top, 0px)); right: 16px; display: grid; gap: 8px; justify-items: end; }
+  #radar { width: 132px; height: 132px; }
+  .hud-buttons { display: flex; gap: 5px; justify-content: flex-end; }
+  .hud-buttons .btn { padding: 6px 8px; font-size: 13px; }
+  .badge { display: inline-block; min-width: 18px; padding: 1px 5px; margin-left: 4px; border-radius: 9px; background: var(--tide); color: var(--abyss); font-weight: 700; font-size: 12px; text-align: center; }
+  .badge[data-empty="1"] { background: var(--bad); color: #fff; }
 
-  #callout {
-    position: absolute; left: 50%; top: 30%; transform: translate(-50%, -50%);
-    text-align: center; display: grid; gap: 4px; width: max-content; max-width: calc(100vw - 32px);
+  /* squad list */
+  #squad {
+    position: absolute; top: calc(10px + env(safe-area-inset-top, 0px)); left: 16px; width: 272px; padding: 8px; display: grid; gap: 6px;
   }
-  .co-main { font: 400 clamp(40px, 9vw, 76px)/1 var(--display); letter-spacing: 0.04em; text-shadow: 0 4px 30px rgba(0,0,0,0.6); }
-  .co-sub { font: 600 16px/1.2 var(--ui); letter-spacing: 0.08em; color: var(--mist); text-transform: uppercase; text-shadow: 0 2px 10px rgba(0,0,0,0.8); }
-  #callout[data-tone="good"] .co-main { color: var(--gold); }
-  #callout[data-tone="bad"] .co-main { color: var(--bad); }
-  #callout.pop { animation: pop 0.45s cubic-bezier(.2, 1.6, .4, 1); }
-  @keyframes pop { from { transform: translate(-50%, -50%) scale(0.6); opacity: 0; } to { transform: translate(-50%, -50%) scale(1); opacity: 1; } }
+  #squad-list, #opp-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+  .sq {
+    display: grid; grid-template-columns: 22px 1fr auto; grid-template-rows: auto auto; column-gap: 7px; row-gap: 2px;
+    padding: 5px 7px; border-radius: 4px; cursor: pointer; border: 1px solid transparent; align-items: center;
+  }
+  .sq:hover { background: rgba(126, 226, 246, 0.07); }
+  .sq[aria-selected="true"] { border-color: var(--tide); background: rgba(63, 208, 232, 0.12); }
+  .sq .num { grid-row: 1 / 3; font: 700 15px/1 var(--ui); text-align: center; color: var(--team); }
+  .sq .nm { font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sq .nm small { font-weight: 500; color: var(--mist); font-size: 11px; letter-spacing: 0.08em; margin-left: 4px; }
+  .sq .ord { grid-column: 2 / 4; font-size: 12px; color: var(--mist); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sq .ord b { color: var(--foam); font-weight: 600; }
+  .sq .tag { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; padding: 2px 5px; border-radius: 3px; background: rgba(126, 226, 246, 0.12); color: var(--mist); }
+  .sq .tag[data-manual="1"] { background: rgba(232, 182, 74, 0.2); color: var(--gold); }
+  .sq .hpbar { grid-column: 2 / 4; height: 3px; border-radius: 2px; background: rgba(255,255,255,0.08); overflow: hidden; }
+  .sq .hpbar i { display: block; height: 100%; background: var(--tide); }
+  .sq .hpbar i[data-low="1"] { background: var(--ember); }
+  .sq .ball { color: var(--gold); margin-left: 3px; }
+  #opp-list .sq { grid-template-rows: auto; padding: 3px 7px; }
+  #opp-list .sq .hpbar { grid-column: 3; width: 44px; }
+  details.opp summary { cursor: pointer; font: 600 11px/1 var(--ui); letter-spacing: 0.18em; text-transform: uppercase; color: var(--mist); padding: 4px 2px; }
 
+  /* player card */
   .card {
-    position: absolute; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-    width: 250px; background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 6px; padding: 10px 12px; display: grid; gap: 7px;
+    position: absolute; left: 16px; bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+    width: 272px; padding: 10px 12px; display: grid; gap: 7px;
   }
   .card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
   #card-name { font: 400 19px/1 var(--display); }
-  #card-role { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--mist); }
+  #card-role { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--mist); text-align: right; }
   .meter { height: 7px; border-radius: 4px; background: rgba(255,255,255,0.08); overflow: hidden; }
   .meter > i { display: block; height: 100%; border-radius: 4px; transition: width 0.15s; }
   #hp-fill { background: linear-gradient(90deg, #36b8d4, var(--tide)); }
@@ -189,73 +212,183 @@
   #card-stats div { display: grid; }
   #card-stats dt { font-size: 10px; letter-spacing: 0.1em; color: var(--mist); }
   #card-stats dd { margin: 0; font: 700 14px/1.1 var(--ui); font-variant-numeric: tabular-nums; }
+  #card-stats dd[data-tired="1"] { color: var(--ember); }
+  #card-order { font-size: 13px; }
+  #card-order b { color: var(--gold); font-weight: 600; }
+  #card-reach { font-size: 12px; color: var(--mist); }
 
-  #hints {
-    position: absolute; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-    display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px 14px; max-width: min(520px, 55vw);
-    font-size: 14px; color: var(--mist); text-shadow: 0 1px 6px rgba(0,0,0,0.9);
+  /* log */
+  #logpanel {
+    position: absolute; right: 16px; top: calc(196px + env(safe-area-inset-top, 0px)); width: 300px;
+    bottom: calc(260px + env(safe-area-inset-bottom, 0px)); min-height: 120px; padding: 8px; display: grid; grid-template-rows: auto 1fr; gap: 6px;
   }
-  #hints span { display: inline-flex; gap: 4px; align-items: center; }
-  #hints b { color: var(--gold); font-weight: 700; }
+  #log { list-style: none; margin: 0; padding: 0 2px 0 0; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  #log li { border-left: 3px solid rgba(156, 195, 207, 0.4); padding: 3px 7px; background: rgba(255,255,255,0.03); border-radius: 0 3px 3px 0; line-height: 1.3; }
+  #log li[data-tone="good"] { border-left-color: var(--good); }
+  #log li[data-tone="bad"] { border-left-color: var(--bad); }
+  #log li[data-big="1"] { font-weight: 700; }
+  #log li.beat { border: 0; background: none; color: var(--mist); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; padding: 6px 2px 1px; }
+  #log li .min { color: var(--mist); margin-right: 5px; }
 
-  .hud-buttons { position: absolute; top: calc(152px + env(safe-area-inset-top, 0px)); right: 16px; display: flex; gap: 6px; pointer-events: auto; }
-  .hud-buttons .btn { padding: 6px 10px; font-size: 13px; }
+  /* risk + goal view */
+  #risk {
+    position: absolute; right: 16px; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); width: 300px; padding: 10px; display: grid; gap: 6px;
+  }
+  #risk-main { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  #risk-title { font-weight: 700; font-size: 14px; }
+  #risk-pct { font: 400 30px/1 var(--display); color: var(--gold); font-variant-numeric: tabular-nums; }
+  #risk-pct[data-level="low"] { color: var(--bad); }
+  #risk-pct[data-level="mid"] { color: var(--gold); }
+  #risk-pct[data-level="high"] { color: var(--good); }
+  #risk-lines { margin: 0; padding: 0; list-style: none; font-size: 12.5px; color: var(--mist); display: grid; gap: 2px; font-variant-numeric: tabular-nums; }
+  #risk-lines b { color: var(--foam); font-weight: 600; }
+  .gripbar { position: relative; height: 12px; border-radius: 3px; background: rgba(255,255,255,0.07); margin-top: 2px; }
+  .gripbar .grip { position: absolute; top: 0; bottom: 0; background: rgba(255, 107, 94, 0.45); border-radius: 3px; }
+  .gripbar .pow { position: absolute; top: -3px; bottom: -3px; width: 3px; background: var(--gold); border-radius: 2px; }
+  #goalview { width: 180px; height: 180px; justify-self: center; border-radius: 6px; cursor: crosshair; touch-action: none; }
+  .gv-cap { font-size: 11px; color: var(--mist); text-align: center; }
+
+  /* order bar */
+  #orderbar, #playbar {
+    position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    display: flex; gap: 6px; align-items: stretch; padding: 6px; max-width: calc(100vw - 24px); overflow-x: auto;
+  }
+  .ob-group { display: flex; gap: 4px; padding-right: 6px; border-right: 1px solid var(--panel-edge); }
+  .ob-group:last-of-type { border-right: 0; }
+  #orderbar .btn, #playbar .btn { padding: 6px 9px; font-size: 13px; display: grid; justify-items: center; gap: 2px; min-width: 50px; line-height: 1.1; }
+  #orderbar .btn kbd { font-size: 10px; padding: 1px 3px; opacity: 0.8; }
+  #orderbar .btn.on { background: rgba(63, 208, 232, 0.3); border-color: var(--tide); }
+  #orderbar[data-carrier="1"] .carrier-only { background: rgba(232, 182, 74, 0.1); }
+  #orderbar .btn.carrier-only.on { background: rgba(232, 182, 74, 0.35); border-color: var(--gold); }
+  #orderbar .btn[data-cmd="tech"]:not(:disabled) { color: var(--ember); border-color: var(--ember); }
+  #resolve { background: linear-gradient(180deg, #f6cf6c, var(--gold) 60%, #c68e25) !important; color: #241500; border-color: #f6cf6c !important; font: 400 17px/1 var(--display) !important; padding: 8px 16px !important; min-width: 124px !important; }
+  #hint {
+    position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(86px + env(safe-area-inset-bottom, 0px));
+    font-size: 13.5px; color: var(--foam); text-shadow: 0 1px 6px rgba(0,0,0,0.95); white-space: nowrap; max-width: calc(100vw - 660px); overflow: hidden; text-overflow: ellipsis;
+  }
+  #height-flag { color: var(--gold); font-weight: 700; margin-left: 8px; }
+  #playbar .lbl { align-self: center; padding: 0 8px; color: var(--mist); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+  #callout {
+    position: absolute; left: 50%; top: 28%; transform: translate(-50%, -50%);
+    text-align: center; display: grid; gap: 4px; width: max-content; max-width: calc(100vw - 32px);
+  }
+  .co-main { font: 400 clamp(40px, 9vw, 76px)/1 var(--display); letter-spacing: 0.04em; text-shadow: 0 4px 30px rgba(0,0,0,0.6); }
+  .co-sub { font: 600 16px/1.2 var(--ui); letter-spacing: 0.08em; color: var(--foam); text-transform: uppercase; text-shadow: 0 2px 10px rgba(0,0,0,0.9); }
+  #callout[data-tone="good"] .co-main { color: var(--gold); }
+  #callout[data-tone="bad"] .co-main { color: var(--bad); }
+  #callout.pop { animation: pop 0.45s cubic-bezier(.2, 1.6, .4, 1); }
+  @keyframes pop { from { transform: translate(-50%, -50%) scale(0.6); opacity: 0; } to { transform: translate(-50%, -50%) scale(1); opacity: 1; } }
+  #floaters { position: absolute; inset: 0; overflow: hidden; }
+  .floater {
+    position: absolute; transform: translate(-50%, -100%); white-space: nowrap; font: 700 14px/1.2 var(--ui);
+    padding: 4px 9px; border-radius: 4px; background: var(--panel-solid); border: 1px solid var(--panel-edge); font-variant-numeric: tabular-nums;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  }
+  .floater[data-tone="good"] { border-color: var(--good); }
+  .floater[data-tone="bad"] { border-color: var(--bad); }
+
+  /* ---------- tactics ---------- */
+  #tactics .sheet { width: min(1100px, 100%); }
+  .tac-grid { display: grid; grid-template-columns: 400px 1fr; gap: 18px; }
+  .tac-col { display: grid; gap: 12px; align-content: start; min-width: 0; }
+  #schematic { width: 400px; height: 440px; background: rgba(3, 16, 25, 0.7); border: 1px solid var(--panel-edge); border-radius: 6px; touch-action: none; cursor: grab; }
+  .tac-row { display: grid; grid-template-columns: 130px 1fr 64px; gap: 10px; align-items: center; font-size: 14px; }
+  .tac-row label { color: var(--mist); }
+  .tac-row output { font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+  .tac-row input[type="range"] { width: 100%; accent-color: var(--tide); }
+  .tac-row .ends { display: flex; justify-content: space-between; font-size: 11px; color: var(--mist); grid-column: 2; margin-top: -8px; }
+  table.tac-players { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.tac-players th { text-align: left; font-weight: 600; color: var(--mist); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; padding: 4px; }
+  table.tac-players td { padding: 3px 4px; border-top: 1px solid rgba(126, 226, 246, 0.12); vertical-align: middle; }
+  table.tac-players select { font: inherit; color: var(--foam); background: var(--deep); border: 1px solid var(--panel-edge); border-radius: 3px; padding: 3px 4px; width: 100%; }
+  .mini-hp { width: 48px; height: 4px; border-radius: 2px; background: rgba(255,255,255,0.1); overflow: hidden; display: inline-block; vertical-align: middle; }
+  .mini-hp i { display: block; height: 100%; background: var(--tide); }
+  .tac-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  #tac-cost { color: var(--mist); font-size: 14px; }
+  #tac-cost b { color: var(--gold); }
+  .role-help { font-size: 12px; color: var(--mist); }
 
   /* ---------- interval / pause ---------- */
   .sheet {
-    width: min(440px, 100%); margin-block: auto; background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 8px;
-    padding: 22px; display: grid; gap: 16px; backdrop-filter: blur(6px);
+    width: min(460px, 100%); margin-block: auto; background: var(--panel-solid); border: 1px solid var(--panel-edge); border-radius: 8px;
+    padding: 20px; display: grid; gap: 14px;
   }
-  .sheet h2 { font: 400 32px/1 var(--display); margin: 0; color: var(--gold); text-wrap: balance; }
+  .sheet h2 { font: 400 30px/1 var(--display); margin: 0; color: var(--gold); text-wrap: balance; }
   #interval-score { display: flex; align-items: center; justify-content: center; gap: 14px; font-variant-numeric: tabular-nums; }
   #interval-score span { font: 600 16px/1 var(--ui); letter-spacing: 0.1em; color: var(--mist); }
   #interval-score b { font: 400 52px/1 var(--display); }
   #interval-score i { font-style: normal; color: var(--mist); font-size: 28px; }
   #interval-stats { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-  #interval-stats td, #interval-stats th { padding: 6px 4px; border-top: 1px solid rgba(126, 226, 246, 0.12); }
+  #interval-stats td, #interval-stats th { padding: 5px 4px; border-top: 1px solid rgba(126, 226, 246, 0.12); }
   #interval-stats td { font: 700 17px/1 var(--ui); width: 64px; }
   #interval-stats td:first-child { text-align: left; }
   #interval-stats td:last-child { text-align: right; }
   #interval-stats th { font-weight: 500; color: var(--mist); font-size: 14px; }
+  #interval-scorers { font-size: 13px; color: var(--mist); text-align: center; margin: 0; }
 
-  /* ---------- touch controls ---------- */
-  #touch { position: fixed; inset: 0; pointer-events: none; z-index: 6; display: none; }
-  body.touch.playing #touch { display: block; }
-  body.touch .card { bottom: auto; top: calc(62px + env(safe-area-inset-top, 0px)); left: 16px; width: 200px; padding: 8px 10px; }
-  body.touch #card-stats, body.touch #ticker { display: none; }
-  body.touch #radar { width: 96px; height: 96px; }
-  body.touch .hud-buttons { top: calc(114px + env(safe-area-inset-top, 0px)); }
-  .stick {
-    position: absolute; left: 22px; bottom: calc(26px + env(safe-area-inset-bottom, 0px));
-    width: 132px; height: 132px; border-radius: 50%;
-    background: radial-gradient(circle, rgba(126,226,246,0.10), rgba(126,226,246,0.03));
-    border: 1px solid var(--panel-edge); pointer-events: auto; touch-action: none; display: grid; place-items: center;
+  /* ---------- small screens / touch ---------- */
+  @media (max-width: 1100px) {
+    #logpanel { width: 250px; }
+    #risk { width: 250px; }
+    #hint { max-width: calc(100vw - 32px); bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
   }
-  .knob { width: 54px; height: 54px; border-radius: 50%; background: rgba(230, 246, 249, 0.3); border: 1px solid rgba(230,246,249,0.6); }
-  .pad {
-    position: absolute; right: 16px; bottom: calc(20px + env(safe-area-inset-bottom, 0px));
-    display: grid; grid-template-columns: repeat(3, 62px); grid-template-rows: repeat(3, 62px); gap: 8px; pointer-events: auto;
+  @media (max-width: 900px), (max-height: 600px) {
+    #logpanel { display: none; }
+    #logpanel.open { display: grid; top: 110px; bottom: 120px; right: 8px; z-index: 3; }
+    #squad { width: 200px; }
+    .sq .ord { display: none; }
+    .card { display: none; }
+    #orderbar .btn:disabled { display: none; }
+    #orderbar .btn kbd { display: none; }
+    #orderbar .btn, #playbar .btn { min-width: 0; padding: 7px 8px; }
+    .ob-group { padding-right: 4px; }
   }
-  .pad button {
-    border-radius: 50%; border: 1px solid var(--panel-edge); background: var(--panel); touch-action: none;
-    font: 700 12px/1.05 var(--ui); letter-spacing: 0.04em; text-transform: uppercase; padding: 0;
+  @media (max-height: 600px) {
+    #radar { width: 88px; height: 88px; }
+    #squad { top: 8px; left: 8px; padding: 4px; width: 176px; }
+    #squad h3, details.opp { display: none; }
+    .sq { padding: 2px 5px; }
+    .sq .tag { display: none; }
+    #risk { width: 240px; bottom: 70px; padding: 6px; grid-template-columns: 1fr auto; }
+    #risk-main, #risk-lines { grid-column: 1; }
+    #goalview { grid-column: 2; grid-row: 1 / 4; width: 110px; height: 110px; }
+    .gv-cap { display: none; }
+    #risk-lines li:nth-child(n+3) { display: none; }
+    #hint { display: none; }
+    #phase-tag { top: 56px; }
   }
-  .pad button.held { background: rgba(63, 208, 232, 0.35); }
-  .pad .p-pass { grid-area: 3 / 2; background: rgba(63, 208, 232, 0.28); }
-  .pad .p-shoot { grid-area: 2 / 3; background: rgba(232, 182, 74, 0.32); }
-  .pad .p-special { grid-area: 1 / 3; background: rgba(255, 122, 58, 0.3); }
-  .pad .p-switch { grid-area: 2 / 2; }
-  .pad .p-up { grid-area: 1 / 1; }
-  .pad .p-down { grid-area: 2 / 1; }
-  .pad .p-sprint { grid-area: 3 / 3; }
-  .pad .p-face { grid-area: 3 / 1; }
-
-  @media (max-width: 640px) {
-    .scoreboard { left: 16px; transform: scale(0.88); transform-origin: top left; }
-    #radar { width: 96px; height: 96px; }
-    .hud-buttons { top: calc(114px + env(safe-area-inset-top, 0px)); }
-    #hints { display: none; }
-    .card { width: 200px; }
+  @media (max-width: 700px) {
+    .scoreboard { left: 8px; transform: scale(0.82); transform-origin: top left; }
+    #phase-tag { top: 56px; left: 8px; transform: none; font-size: 10px; padding: 4px 7px; }
+    .topright { right: 8px; top: 8px; }
+    #radar { width: 64px; height: 64px; }
+    .hud-buttons .btn { padding: 5px 6px; font-size: 11px; }
+    .hud-buttons #focus-btn, .hud-buttons #replay-btn { display: none; }
+    #squad { top: 114px; left: 8px; right: 8px; width: auto; padding: 4px; }
+    #squad h3, details.opp { display: none; }
+    #squad-list { grid-template-columns: repeat(3, 1fr); gap: 3px; }
+    .sq { grid-template-columns: 18px 1fr; padding: 3px 4px; column-gap: 4px; }
+    .sq .tag, .sq .nm small { display: none; }
+    .sq .nm { font-size: 12.5px; }
+    #risk { left: 8px; right: 8px; width: auto; bottom: 146px; padding: 6px; grid-template-columns: 1fr auto; column-gap: 8px; min-height: 118px; align-content: start; }
+    #risk-main, #risk-lines { grid-column: 1; }
+    #risk-pct { font-size: 24px; }
+    #goalview { grid-column: 2; grid-row: 1 / 4; width: 104px; height: 104px; }
+    .gv-cap { display: none; }
+    #risk-lines { font-size: 11.5px; }
+    #risk-lines li:nth-child(n+3) { display: none; }
+    #hint { display: none; }
+    #orderbar { left: 8px; right: 8px; transform: none; max-width: none; flex-wrap: wrap; justify-content: center; overflow: visible; gap: 4px; }
+    .ob-group { display: contents; }
+    #orderbar .btn { font-size: 12.5px; padding: 8px 7px; }
+    #resolve { flex: 1 1 100%; min-height: 40px; }
+    #playbar { left: 8px; right: 8px; transform: none; justify-content: center; }
+    .tac-grid { grid-template-columns: 1fr; }
+    #schematic { width: 100%; height: auto; aspect-ratio: 400 / 440; }
+    .tac-row { grid-template-columns: 96px 1fr 52px; }
+    table.tac-players { font-size: 12px; }
+    #callout .co-main { font-size: 44px; }
   }
   @media (max-width: 460px) {
     #team-options { grid-template-columns: 1fr; }
@@ -268,14 +401,14 @@
 </style>
 </head>
 <body>
-<canvas id="game" aria-label="Blitzball match view"></canvas>
+<canvas id="game" aria-label="Blitzball sphere"></canvas>
 
 <section id="menu" class="overlay" aria-labelledby="title">
   <div class="menu-inner">
     <div>
       <div class="eyebrow">Luca Stadium · Sphere Pool</div>
-      <h1 id="title">Blitzball</h1>
-      <p class="lede">Six a side inside a floating sphere of water. Break tackles, thread passes past blockers and beat the keeper's grip with raw shot power.</p>
+      <h1 id="title">Blitzball Tactics</h1>
+      <p class="lede">Six a side inside a floating sphere of water, one two-second beat at a time. Both coaches give every swimmer an order in secret, then the beat plays out and every duel is settled on the stats.</p>
     </div>
 
     <fieldset>
@@ -284,71 +417,152 @@
     </fieldset>
 
     <fieldset>
-      <legend>Opposition</legend>
+      <legend>Opposition coach</legend>
       <div class="segs" id="diff-options"></div>
     </fieldset>
 
     <fieldset>
-      <legend>Match length</legend>
+      <legend>Match length (beats per half)</legend>
       <div class="segs" id="len-options"></div>
     </fieldset>
 
     <p class="gl-error" id="gl-error" hidden>This browser couldn't start WebGL, which the 3D sphere needs. Try a current version of Chrome, Edge, Firefox or Safari with hardware acceleration turned on.</p>
 
     <div class="actions">
-      <button class="btn primary" id="start" type="button">Enter the sphere</button>
+      <button class="btn primary" id="start" type="button">Set tactics</button>
       <button class="btn" id="mute" type="button" aria-pressed="false">Sound on</button>
     </div>
 
     <dl class="controls-list kb-only">
-      <dt><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></dt><dd>Swim where the camera looks</dd>
-      <dt><kbd>Space</kbd><kbd>C</kbd></dt><dd>Rise and dive</dd>
-      <dt><kbd>Mouse</kbd><kbd>←→↑↓</kbd></dt><dd>Look around</dd>
-      <dt><kbd>J</kbd><kbd>Click</kbd></dt><dd>Pass to the ringed teammate, or tackle</dd>
-      <dt><kbd>K</kbd><kbd>Right-click</kbd></dt><dd>Shoot, or switch swimmer on defence</dd>
-      <dt><kbd>E</kbd></dt><dd>Jecht Shot when the meter is full</dd>
-      <dt><kbd>Shift</kbd></dt><dd>Sprint (drains HP)</dd>
-      <dt><kbd>Q</kbd><kbd>F</kbd></dt><dd>Switch swimmer · face goal or ball</dd>
-      <dt><kbd>Esc</kbd></dt><dd>Pause</dd>
+      <dt><kbd>Click</kbd><kbd>Tab</kbd><kbd>1</kbd>–<kbd>6</kbd></dt><dd>Select a swimmer</dd>
+      <dt><kbd>Drag</kbd> from a swimmer</dt><dd>Set where they go · hold <kbd>Shift</kbd> to raise or lower</dd>
+      <dt><kbd>Drag</kbd> empty water · <kbd>Wheel</kbd></dt><dd>Orbit and zoom (time is frozen while you plan)</dd>
+      <dt><kbd>M</kbd><kbd>S</kbd><kbd>K</kbd><kbd>H</kbd><kbd>P</kbd></dt><dd>Move, sprint, mark, hold, press</dd>
+      <dt><kbd>D</kbd><kbd>A</kbd><kbd>T</kbd><kbd>G</kbd><kbd>J</kbd></dt><dd>With the ball: dribble, pass, through ball, shoot, Jecht Shot</dd>
+      <dt><kbd>Space</kbd><kbd>Enter</kbd></dt><dd>Resolve the beat</dd>
     </dl>
-    <p class="lede touch-only">Left stick swims toward where the camera looks. Drag the view to turn. Pass, shoot and tackle from the pad on the right.</p>
+    <p class="lede touch-only">Tap a swimmer, then drag from them to set their destination. Use the Height button to raise or lower it, and the order bar for everything else.</p>
   </div>
 </section>
 
 <div id="hud" hidden>
   <div class="scoreboard" role="status" aria-live="polite">
     <div class="sb-team" id="sb-home"><span class="sb-swatch"></span><span class="sb-name">AUR</span><span class="sb-score">0</span></div>
-    <div class="sb-mid"><span id="sb-clock">3:00</span><span id="sb-half">1st half</span></div>
+    <div class="sb-mid"><span id="sb-clock">0'</span><span id="sb-half">1st half</span></div>
     <div class="sb-team" id="sb-away"><span class="sb-swatch"></span><span class="sb-name">GOE</span><span class="sb-score">0</span></div>
   </div>
-  <ul id="ticker" aria-live="polite"></ul>
-  <canvas id="radar" width="264" height="264" aria-label="Sphere radar, seen from above"></canvas>
-  <div class="hud-buttons"><button class="btn" id="pause-btn" type="button">Pause</button></div>
-  <div id="callout" hidden><div class="co-main"></div><div class="co-sub"></div></div>
-  <div class="card">
+  <div id="phase-tag" data-phase="plan">Planning · beat 1 of 18</div>
+
+  <div class="topright">
+    <canvas id="radar" width="264" height="264" aria-label="Sphere radar, seen from above"></canvas>
+    <div class="hud-buttons">
+      <button class="btn" id="tac-btn" type="button">Tactics <span class="badge" id="tac-badge">3</span></button>
+      <button class="btn" id="replay-btn" type="button" title="Replay the last beat (R)">Replay</button>
+      <button class="btn" id="view-btn" type="button" title="Broadcast view (C)">View</button>
+      <button class="btn" id="focus-btn" type="button" title="Orbit the selected swimmer (F)">Focus</button>
+      <button class="btn" id="log-btn" type="button">Log</button>
+      <button class="btn" id="menu-btn" type="button">Menu</button>
+    </div>
+  </div>
+
+  <aside id="squad" class="panel" aria-label="Your squad">
+    <h3><span>Your squad</span></h3>
+    <ol id="squad-list"></ol>
+    <details class="opp"><summary>Opponents</summary><ol id="opp-list"></ol></details>
+  </aside>
+
+  <section class="card panel" aria-label="Selected player">
     <div class="card-head"><span id="card-name">10 · Tidus</span><span id="card-role">Midfield</span></div>
     <div class="meter-label"><span>HP</span><span id="hp-text">120 / 120</span></div>
     <div class="meter"><i id="hp-fill" style="width:100%"></i></div>
     <dl id="card-stats"></dl>
-    <div class="meter-label"><span id="od-label">Jecht Shot</span></div>
+    <div id="card-order"></div>
+    <div id="card-reach"></div>
+    <div class="meter-label"><span id="od-label">Jecht Shot</span><span id="od-pct">0%</span></div>
     <div class="meter"><i id="od-fill" style="width:0%"></i></div>
+  </section>
+
+  <aside id="logpanel" class="panel" aria-label="Match log">
+    <h3><span>Match log</span></h3>
+    <ol id="log" class="scroll" aria-live="polite"></ol>
+  </aside>
+
+  <section id="risk" class="panel" hidden aria-live="polite">
+    <div id="risk-main"><span id="risk-title">Shot</span><span id="risk-pct">0%</span></div>
+    <ul id="risk-lines"></ul>
+    <canvas id="goalview" class="interactive" width="300" height="300" hidden></canvas>
+    <div class="gv-cap" id="gv-cap" hidden>Goal view · click to aim · brighter = better odds</div>
+  </section>
+
+  <div id="hint"></div>
+
+  <div id="orderbar" class="panel" data-carrier="0">
+    <div class="ob-group">
+      <button class="btn" type="button" data-cmd="move"><span>Move</span><kbd>M</kbd></button>
+      <button class="btn" type="button" data-cmd="sprint"><span>Sprint</span><kbd>S</kbd></button>
+      <button class="btn" type="button" data-cmd="mark"><span>Mark</span><kbd>K</kbd></button>
+      <button class="btn" type="button" data-cmd="hold"><span>Hold</span><kbd>H</kbd></button>
+      <button class="btn" type="button" data-cmd="press"><span>Press</span><kbd>P</kbd></button>
+    </div>
+    <div class="ob-group">
+      <button class="btn carrier-only" type="button" data-cmd="dribble"><span>Dribble</span><kbd>D</kbd></button>
+      <button class="btn carrier-only" type="button" data-cmd="pass"><span>Pass</span><kbd>A</kbd></button>
+      <button class="btn carrier-only" type="button" data-cmd="through"><span>Through</span><kbd>T</kbd></button>
+      <button class="btn carrier-only" type="button" data-cmd="shoot"><span>Shoot</span><kbd>G</kbd></button>
+      <button class="btn carrier-only" type="button" data-cmd="tech"><span>Jecht</span><kbd>J</kbd></button>
+      <button class="btn carrier-only" type="button" data-cmd="timing"><span class="lbl">At start</span><kbd>L</kbd></button>
+    </div>
+    <div class="ob-group">
+      <button class="btn" type="button" data-cmd="height"><span>Height</span><kbd>V</kbd></button>
+      <button class="btn" type="button" data-cmd="auto"><span>Auto</span><kbd>U</kbd></button>
+      <button class="btn" type="button" data-cmd="autoall"><span>All auto</span><kbd>⇧U</kbd></button>
+    </div>
+    <button class="btn" type="button" id="resolve">Resolve beat</button>
   </div>
-  <div id="hints"></div>
+
+  <div id="playbar" class="panel" hidden>
+    <button class="btn" type="button" id="pb-replay"><span>Replay</span></button>
+    <button class="btn" type="button" id="pb-speed"><span>1×</span></button>
+    <span class="lbl" id="pb-label">Beat 1</span>
+    <button class="btn" type="button" id="pb-skip"><span>Skip</span></button>
+  </div>
+
+  <div id="callout" hidden><div class="co-main"></div><div class="co-sub"></div></div>
+  <div id="floaters"></div>
 </div>
 
-<div id="touch" aria-hidden="true">
-  <div class="stick" data-stick><div class="knob" data-knob></div></div>
-  <div class="pad">
-    <button type="button" class="p-special" data-action="special">Jecht</button>
-    <button type="button" class="p-shoot" data-action="shoot">Shoot</button>
-    <button type="button" class="p-pass" data-action="pass">Pass<br>Tackle</button>
-    <button type="button" class="p-switch" data-action="switch">Switch</button>
-    <button type="button" class="p-up" data-hold="up">Rise</button>
-    <button type="button" class="p-down" data-hold="down">Dive</button>
-    <button type="button" class="p-sprint" data-hold="sprint">Sprint</button>
-    <button type="button" class="p-face" data-action="face">Face</button>
+<section id="tactics" class="overlay center" hidden aria-labelledby="tac-title">
+  <div class="sheet">
+    <div class="tac-foot">
+      <h2 id="tac-title">Tactics</h2>
+      <span id="tac-cost"></span>
+    </div>
+    <div class="tac-grid">
+      <div class="tac-col">
+        <div class="segs" id="tac-presets"></div>
+        <canvas id="schematic" width="800" height="880" aria-label="Formation schematic: top view above, side view below. Drag players to move their base positions."></canvas>
+        <p class="role-help">Top: seen from above. Bottom: seen from the side. You attack to the right. Drag a dot to move that swimmer's base position.</p>
+      </div>
+      <div class="tac-col">
+        <div class="tac-row"><label for="tac-press">Pressing</label><input type="range" id="tac-press" min="0" max="3" step="1"><output id="tac-press-o"></output></div>
+        <div class="tac-row"><label for="tac-depth">Defensive line</label><input type="range" id="tac-depth" min="0" max="1" step="0.05"><output id="tac-depth-o"></output><div class="ends"><span>Deep</span><span>High</span></div></div>
+        <div class="tac-row"><label for="tac-width">Width</label><input type="range" id="tac-width" min="0" max="1" step="0.05"><output id="tac-width-o"></output><div class="ends"><span>Narrow</span><span>Wide</span></div></div>
+        <div class="tac-row"><label for="tac-tempo">Tempo</label><input type="range" id="tac-tempo" min="0" max="1" step="0.05"><output id="tac-tempo-o"></output><div class="ends"><span>Dribble</span><span>Pass</span></div></div>
+        <div class="tac-row"><label>Shooting</label><div class="segs" id="tac-shoot"></div><span></span></div>
+        <table class="tac-players">
+          <thead><tr><th>Slot</th><th>Player</th><th>Role</th><th>Marks</th><th>Sub</th></tr></thead>
+          <tbody id="tac-players"></tbody>
+        </table>
+        <p class="role-help" id="role-help"></p>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn primary" id="tac-apply" type="button">Kick off</button>
+      <button class="btn" id="tac-cancel" type="button">Cancel</button>
+      <button class="btn" id="tac-reset" type="button">Reset to defaults</button>
+    </div>
   </div>
-</div>
+</section>
 
 <section id="pause" class="overlay center" hidden aria-labelledby="pause-title">
   <div class="sheet">
@@ -356,6 +570,7 @@
     <div class="actions">
       <button class="btn primary" id="resume" type="button">Resume</button>
       <button class="btn" id="quit" type="button">Leave match</button>
+      <button class="btn" id="mute2" type="button">Sound on</button>
     </div>
   </div>
 </section>
@@ -364,9 +579,11 @@
   <div class="sheet">
     <h2 id="interval-title">Half time</h2>
     <div id="interval-score"></div>
+    <p id="interval-scorers"></p>
     <table id="interval-stats"></table>
     <div class="actions">
       <button class="btn primary" id="interval-go" type="button">Start 2nd half</button>
+      <button class="btn" id="interval-tac" type="button">Tactics</button>
       <button class="btn" id="interval-menu" type="button">Main menu</button>
     </div>
   </div>
