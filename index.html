@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FFBB Blitzball</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Marcellus+SC&family=Barlow+Semi+Condensed:wght@400;500;600;700&display=swap">
+<style>
+  :root {
+    color-scheme: dark;
+    --abyss: #031019;
+    --deep: #072638;
+    --panel: rgba(4, 22, 34, 0.78);
+    --panel-edge: rgba(126, 226, 246, 0.28);
+    --tide: #3fd0e8;
+    --foam: #e6f6f9;
+    --mist: #9cc3cf;
+    --gold: #e8b64a;
+    --gold-deep: #9a6a12;
+    --ember: #ff7a3a;
+    --good: #67e6a4;
+    --bad: #ff6b5e;
+    --display: 'Marcellus SC', 'Trajan Pro', Georgia, serif;
+    --ui: 'Barlow Semi Condensed', 'Arial Narrow', 'Roboto Condensed', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--abyss);
+    color: var(--foam);
+    font: 500 15px/1.4 var(--ui);
+    overflow: hidden;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  [hidden] { display: none !important; }
+  button { font: inherit; color: inherit; }
+  kbd {
+    font: 600 12px/1 var(--ui);
+    padding: 3px 5px;
+    border: 1px solid var(--panel-edge);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: rgba(126, 226, 246, 0.08);
+    color: var(--foam);
+    letter-spacing: 0.02em;
+  }
+  :focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+  /* ---------- menu ---------- */
+  .overlay {
+    position: fixed; inset: 0;
+    display: flex; align-items: flex-start; justify-content: flex-start;
+    padding: max(16px, env(safe-area-inset-top, 0px)) 16px max(16px, env(safe-area-inset-bottom, 0px));
+    overflow-y: auto;
+    z-index: 10;
+  }
+  .overlay.center { justify-content: center; background: rgba(2, 10, 16, 0.55); }
+  #menu { background: linear-gradient(90deg, rgba(3, 16, 25, 0.92) 0%, rgba(3, 16, 25, 0.7) 45%, rgba(3, 16, 25, 0) 75%); }
+  .menu-inner {
+    width: min(460px, 100%);
+    margin-left: clamp(0px, 6vw, 90px);
+    margin-block: auto;
+    display: grid; gap: 22px;
+  }
+  .eyebrow {
+    font: 600 12px/1 var(--ui); letter-spacing: 0.24em; text-transform: uppercase; color: var(--tide);
+    display: flex; gap: 10px; align-items: center;
+  }
+  .eyebrow::after { content: ''; height: 1px; flex: 1; background: linear-gradient(90deg, var(--panel-edge), transparent); }
+  h1 {
+    font: 400 clamp(46px, 11vw, 84px)/0.9 var(--display);
+    margin: 0;
+    letter-spacing: 0.01em;
+    background: linear-gradient(180deg, #fff3cf 0%, var(--gold) 55%, var(--gold-deep) 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    text-shadow: 0 0 40px rgba(232, 182, 74, 0.18);
+    text-wrap: balance;
+  }
+  .gl-error { margin: 0; padding: 12px 14px; border: 1px solid var(--bad); border-radius: 4px; background: var(--panel); }
+  .lede { margin: 6px 0 0; color: var(--mist); max-width: 40ch; font-size: 16px; }
+  fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 10px; min-width: 0; }
+  legend { font: 600 12px/1 var(--ui); letter-spacing: 0.18em; text-transform: uppercase; color: var(--mist); margin-bottom: 10px; padding: 0; }
+  #team-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .team-card {
+    position: relative; display: grid; gap: 6px; padding: 14px 14px 12px;
+    border: 1px solid var(--panel-edge); border-radius: 6px; background: var(--panel);
+    cursor: pointer; transition: border-color 0.15s, transform 0.15s;
+  }
+  .team-card:hover { transform: translateY(-1px); }
+  .team-card input { position: absolute; opacity: 0; pointer-events: none; }
+  .team-card:has(input:checked) { border-color: var(--team); box-shadow: inset 0 0 0 1px var(--team), 0 0 24px -8px var(--team); }
+  .team-card:has(input:focus-visible) { outline: 2px solid var(--gold); outline-offset: 2px; }
+  .tc-crest { width: 26px; height: 26px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, var(--team), color-mix(in srgb, var(--team) 50%, black)); box-shadow: inset 0 0 0 3px var(--trim); }
+  .tc-name { font: 400 19px/1.05 var(--display); }
+  .tc-star { font-size: 13px; color: var(--mist); }
+  .tbar { display: grid; grid-template-columns: 44px 1fr; align-items: center; gap: 8px; font-size: 12px; color: var(--mist); }
+  .tbar i { display: block; height: 4px; border-radius: 2px; background: linear-gradient(90deg, var(--team) calc(var(--v) * 100%), rgba(255,255,255,0.1) 0); }
+  .segs { display: flex; flex-wrap: wrap; gap: 6px; }
+  .seg { position: relative; cursor: pointer; }
+  .seg input { position: absolute; opacity: 0; pointer-events: none; }
+  .seg span {
+    display: block; padding: 8px 12px; border-radius: 4px; border: 1px solid var(--panel-edge);
+    background: var(--panel); font-weight: 600; font-variant-numeric: tabular-nums;
+  }
+  .seg input:checked + span { background: var(--tide); color: var(--abyss); border-color: var(--tide); }
+  .seg input:focus-visible + span { outline: 2px solid var(--gold); outline-offset: 2px; }
+  .btn {
+    appearance: none; border: 1px solid var(--panel-edge); background: var(--panel);
+    padding: 11px 18px; border-radius: 4px; cursor: pointer; font-weight: 600; letter-spacing: 0.04em;
+  }
+  .btn.primary {
+    background: linear-gradient(180deg, #f6cf6c, var(--gold) 60%, #c68e25);
+    color: #241500; border-color: #f6cf6c; font: 400 20px/1 var(--display); padding: 14px 28px; letter-spacing: 0.06em;
+  }
+  .btn:hover { filter: brightness(1.08); }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .controls-list {
+    display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; font-size: 14px; color: var(--mist); align-items: center;
+  }
+  .controls-list dt { display: flex; gap: 4px; flex-wrap: wrap; }
+  .controls-list dd { margin: 0; }
+  body.touch .kb-only { display: none; }
+  body:not(.touch) .touch-only { display: none; }
+
+  /* ---------- HUD ---------- */
+  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
+  .scoreboard {
+    position: absolute; top: calc(10px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%);
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: stretch;
+    background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 6px;
+    font-variant-numeric: tabular-nums; overflow: hidden;
+  }
+  .sb-team { display: flex; align-items: center; gap: 8px; padding: 6px 12px; font: 600 16px/1 var(--ui); letter-spacing: 0.08em; }
+  #sb-away { flex-direction: row-reverse; }
+  .sb-swatch { width: 8px; align-self: stretch; border-radius: 2px; }
+  .sb-score { font: 400 26px/1 var(--display); min-width: 1ch; text-align: center; }
+  .sb-mid { display: grid; place-items: center; padding: 4px 14px; background: rgba(126, 226, 246, 0.08); border-inline: 1px solid var(--panel-edge); }
+  #sb-clock { font: 700 20px/1 var(--ui); }
+  #sb-half { white-space: nowrap; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--mist); }
+
+  #radar {
+    position: absolute; top: calc(10px + env(safe-area-inset-top, 0px)); right: 16px;
+    width: 132px; height: 132px;
+  }
+  #ticker {
+    position: absolute; top: calc(10px + env(safe-area-inset-top, 0px)); left: 16px; margin: 0; padding: 0; list-style: none;
+    display: grid; gap: 4px; max-width: min(300px, 38vw);
+  }
+  #ticker li {
+    background: var(--panel); border-left: 3px solid var(--mist); padding: 5px 9px; border-radius: 0 4px 4px 0;
+    font-size: 13px; transition: opacity 1s; font-variant-numeric: tabular-nums;
+  }
+  #ticker li[data-tone="good"] { border-left-color: var(--good); }
+  #ticker li[data-tone="bad"] { border-left-color: var(--bad); }
+  #ticker li.old { opacity: 0.35; }
+
+  #callout {
+    position: absolute; left: 50%; top: 30%; transform: translate(-50%, -50%);
+    text-align: center; display: grid; gap: 4px; width: max-content; max-width: calc(100vw - 32px);
+  }
+  .co-main { font: 400 clamp(40px, 9vw, 76px)/1 var(--display); letter-spacing: 0.04em; text-shadow: 0 4px 30px rgba(0,0,0,0.6); }
+  .co-sub { font: 600 16px/1.2 var(--ui); letter-spacing: 0.08em; color: var(--mist); text-transform: uppercase; text-shadow: 0 2px 10px rgba(0,0,0,0.8); }
+  #callout[data-tone="good"] .co-main { color: var(--gold); }
+  #callout[data-tone="bad"] .co-main { color: var(--bad); }
+  #callout.pop { animation: pop 0.45s cubic-bezier(.2, 1.6, .4, 1); }
+  @keyframes pop { from { transform: translate(-50%, -50%) scale(0.6); opacity: 0; } to { transform: translate(-50%, -50%) scale(1); opacity: 1; } }
+
+  .card {
+    position: absolute; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    width: 250px; background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 6px; padding: 10px 12px; display: grid; gap: 7px;
+  }
+  .card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  #card-name { font: 400 19px/1 var(--display); }
+  #card-role { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--mist); }
+  .meter { height: 7px; border-radius: 4px; background: rgba(255,255,255,0.08); overflow: hidden; }
+  .meter > i { display: block; height: 100%; border-radius: 4px; transition: width 0.15s; }
+  #hp-fill { background: linear-gradient(90deg, #36b8d4, var(--tide)); }
+  #hp-fill[data-state="low"] { background: linear-gradient(90deg, #d0502f, var(--ember)); }
+  #od-fill { background: linear-gradient(90deg, #b8641f, var(--ember)); }
+  #od-fill[data-state="full"] { background: linear-gradient(90deg, var(--ember), var(--gold)); animation: glow 0.8s ease-in-out infinite alternate; }
+  @keyframes glow { to { filter: brightness(1.5); } }
+  .meter-label { display: flex; justify-content: space-between; font-size: 12px; color: var(--mist); font-variant-numeric: tabular-nums; }
+  #card-stats { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; margin: 0; text-align: center; }
+  #card-stats div { display: grid; }
+  #card-stats dt { font-size: 10px; letter-spacing: 0.1em; color: var(--mist); }
+  #card-stats dd { margin: 0; font: 700 14px/1.1 var(--ui); font-variant-numeric: tabular-nums; }
+
+  #hints {
+    position: absolute; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px 14px; max-width: min(520px, 55vw);
+    font-size: 14px; color: var(--mist); text-shadow: 0 1px 6px rgba(0,0,0,0.9);
+  }
+  #hints span { display: inline-flex; gap: 4px; align-items: center; }
+  #hints b { color: var(--gold); font-weight: 700; }
+
+  .hud-buttons { position: absolute; top: calc(152px + env(safe-area-inset-top, 0px)); right: 16px; display: flex; gap: 6px; pointer-events: auto; }
+  .hud-buttons .btn { padding: 6px 10px; font-size: 13px; }
+
+  /* ---------- interval / pause ---------- */
+  .sheet {
+    width: min(440px, 100%); margin-block: auto; background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 8px;
+    padding: 22px; display: grid; gap: 16px; backdrop-filter: blur(6px);
+  }
+  .sheet h2 { font: 400 32px/1 var(--display); margin: 0; color: var(--gold); text-wrap: balance; }
+  #interval-score { display: flex; align-items: center; justify-content: center; gap: 14px; font-variant-numeric: tabular-nums; }
+  #interval-score span { font: 600 16px/1 var(--ui); letter-spacing: 0.1em; color: var(--mist); }
+  #interval-score b { font: 400 52px/1 var(--display); }
+  #interval-score i { font-style: normal; color: var(--mist); font-size: 28px; }
+  #interval-stats { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  #interval-stats td, #interval-stats th { padding: 6px 4px; border-top: 1px solid rgba(126, 226, 246, 0.12); }
+  #interval-stats td { font: 700 17px/1 var(--ui); width: 64px; }
+  #interval-stats td:first-child { text-align: left; }
+  #interval-stats td:last-child { text-align: right; }
+  #interval-stats th { font-weight: 500; color: var(--mist); font-size: 14px; }
+
+  /* ---------- touch controls ---------- */
+  #touch { position: fixed; inset: 0; pointer-events: none; z-index: 6; display: none; }
+  body.touch.playing #touch { display: block; }
+  body.touch .card { bottom: auto; top: calc(62px + env(safe-area-inset-top, 0px)); left: 16px; width: 200px; padding: 8px 10px; }
+  body.touch #card-stats, body.touch #ticker { display: none; }
+  body.touch #radar { width: 96px; height: 96px; }
+  body.touch .hud-buttons { top: calc(114px + env(safe-area-inset-top, 0px)); }
+  .stick {
+    position: absolute; left: 22px; bottom: calc(26px + env(safe-area-inset-bottom, 0px));
+    width: 132px; height: 132px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(126,226,246,0.10), rgba(126,226,246,0.03));
+    border: 1px solid var(--panel-edge); pointer-events: auto; touch-action: none; display: grid; place-items: center;
+  }
+  .knob { width: 54px; height: 54px; border-radius: 50%; background: rgba(230, 246, 249, 0.3); border: 1px solid rgba(230,246,249,0.6); }
+  .pad {
+    position: absolute; right: 16px; bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    display: grid; grid-template-columns: repeat(3, 62px); grid-template-rows: repeat(3, 62px); gap: 8px; pointer-events: auto;
+  }
+  .pad button {
+    border-radius: 50%; border: 1px solid var(--panel-edge); background: var(--panel); touch-action: none;
+    font: 700 12px/1.05 var(--ui); letter-spacing: 0.04em; text-transform: uppercase; padding: 0;
+  }
+  .pad button.held { background: rgba(63, 208, 232, 0.35); }
+  .pad .p-pass { grid-area: 3 / 2; background: rgba(63, 208, 232, 0.28); }
+  .pad .p-shoot { grid-area: 2 / 3; background: rgba(232, 182, 74, 0.32); }
+  .pad .p-special { grid-area: 1 / 3; background: rgba(255, 122, 58, 0.3); }
+  .pad .p-switch { grid-area: 2 / 2; }
+  .pad .p-up { grid-area: 1 / 1; }
+  .pad .p-down { grid-area: 2 / 1; }
+  .pad .p-sprint { grid-area: 3 / 3; }
+  .pad .p-face { grid-area: 3 / 1; }
+
+  @media (max-width: 640px) {
+    .scoreboard { left: 16px; transform: scale(0.88); transform-origin: top left; }
+    #radar { width: 96px; height: 96px; }
+    .hud-buttons { top: calc(114px + env(safe-area-inset-top, 0px)); }
+    #hints { display: none; }
+    .card { width: 200px; }
+  }
+  @media (max-width: 460px) {
+    #team-options { grid-template-columns: 1fr; }
+    #menu { background: rgba(3, 16, 25, 0.86); }
+    .menu-inner { margin-left: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #callout.pop, #od-fill[data-state="full"] { animation: none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="game" aria-label="Blitzball match view"></canvas>
+
+<section id="menu" class="overlay" aria-labelledby="title">
+  <div class="menu-inner">
+    <div>
+      <div class="eyebrow">Luca Stadium · Sphere Pool</div>
+      <h1 id="title">Blitzball</h1>
+      <p class="lede">Six a side inside a floating sphere of water. Break tackles, thread passes past blockers and beat the keeper's grip with raw shot power.</p>
+    </div>
+
+    <fieldset>
+      <legend>Your team</legend>
+      <div id="team-options"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Opposition</legend>
+      <div class="segs" id="diff-options"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Match length</legend>
+      <div class="segs" id="len-options"></div>
+    </fieldset>
+
+    <p class="gl-error" id="gl-error" hidden>This browser couldn't start WebGL, which the 3D sphere needs. Try a current version of Chrome, Edge, Firefox or Safari with hardware acceleration turned on.</p>
+
+    <div class="actions">
+      <button class="btn primary" id="start" type="button">Enter the sphere</button>
+      <button class="btn" id="mute" type="button" aria-pressed="false">Sound on</button>
+    </div>
+
+    <dl class="controls-list kb-only">
+      <dt><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></dt><dd>Swim where the camera looks</dd>
+      <dt><kbd>Space</kbd><kbd>C</kbd></dt><dd>Rise and dive</dd>
+      <dt><kbd>Mouse</kbd><kbd>←→↑↓</kbd></dt><dd>Look around</dd>
+      <dt><kbd>J</kbd><kbd>Click</kbd></dt><dd>Pass to the ringed teammate, or tackle</dd>
+      <dt><kbd>K</kbd><kbd>Right-click</kbd></dt><dd>Shoot, or switch swimmer on defence</dd>
+      <dt><kbd>E</kbd></dt><dd>Jecht Shot when the meter is full</dd>
+      <dt><kbd>Shift</kbd></dt><dd>Sprint (drains HP)</dd>
+      <dt><kbd>Q</kbd><kbd>F</kbd></dt><dd>Switch swimmer · face goal or ball</dd>
+      <dt><kbd>Esc</kbd></dt><dd>Pause</dd>
+    </dl>
+    <p class="lede touch-only">Left stick swims toward where the camera looks. Drag the view to turn. Pass, shoot and tackle from the pad on the right.</p>
+  </div>
+</section>
+
+<div id="hud" hidden>
+  <div class="scoreboard" role="status" aria-live="polite">
+    <div class="sb-team" id="sb-home"><span class="sb-swatch"></span><span class="sb-name">AUR</span><span class="sb-score">0</span></div>
+    <div class="sb-mid"><span id="sb-clock">3:00</span><span id="sb-half">1st half</span></div>
+    <div class="sb-team" id="sb-away"><span class="sb-swatch"></span><span class="sb-name">GOE</span><span class="sb-score">0</span></div>
+  </div>
+  <ul id="ticker" aria-live="polite"></ul>
+  <canvas id="radar" width="264" height="264" aria-label="Sphere radar, seen from above"></canvas>
+  <div class="hud-buttons"><button class="btn" id="pause-btn" type="button">Pause</button></div>
+  <div id="callout" hidden><div class="co-main"></div><div class="co-sub"></div></div>
+  <div class="card">
+    <div class="card-head"><span id="card-name">10 · Tidus</span><span id="card-role">Midfield</span></div>
+    <div class="meter-label"><span>HP</span><span id="hp-text">120 / 120</span></div>
+    <div class="meter"><i id="hp-fill" style="width:100%"></i></div>
+    <dl id="card-stats"></dl>
+    <div class="meter-label"><span id="od-label">Jecht Shot</span></div>
+    <div class="meter"><i id="od-fill" style="width:0%"></i></div>
+  </div>
+  <div id="hints"></div>
+</div>
+
+<div id="touch" aria-hidden="true">
+  <div class="stick" data-stick><div class="knob" data-knob></div></div>
+  <div class="pad">
+    <button type="button" class="p-special" data-action="special">Jecht</button>
+    <button type="button" class="p-shoot" data-action="shoot">Shoot</button>
+    <button type="button" class="p-pass" data-action="pass">Pass<br>Tackle</button>
+    <button type="button" class="p-switch" data-action="switch">Switch</button>
+    <button type="button" class="p-up" data-hold="up">Rise</button>
+    <button type="button" class="p-down" data-hold="down">Dive</button>
+    <button type="button" class="p-sprint" data-hold="sprint">Sprint</button>
+    <button type="button" class="p-face" data-action="face">Face</button>
+  </div>
+</div>
+
+<section id="pause" class="overlay center" hidden aria-labelledby="pause-title">
+  <div class="sheet">
+    <h2 id="pause-title">Paused</h2>
+    <div class="actions">
+      <button class="btn primary" id="resume" type="button">Resume</button>
+      <button class="btn" id="quit" type="button">Leave match</button>
+    </div>
+  </div>
+</section>
+
+<section id="interval" class="overlay center" hidden aria-labelledby="interval-title">
+  <div class="sheet">
+    <h2 id="interval-title">Half time</h2>
+    <div id="interval-score"></div>
+    <table id="interval-stats"></table>
+    <div class="actions">
+      <button class="btn primary" id="interval-go" type="button">Start 2nd half</button>
+      <button class="btn" id="interval-menu" type="button">Main menu</button>
+    </div>
+  </div>
+</section>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
