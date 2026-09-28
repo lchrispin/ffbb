@@ -1,5 +1,5 @@
 import * as THREE from './lib.js';
-import { SPHERE_R, GOAL_X, GOAL_RING_R, MARKS, TACKLE_RANGE, sideSign } from './config.js';
+import { SPHERE_R, GOAL_X, GOAL_RING_R, TACKLE_RANGE, AI_TEMPO, HOLD, sideSign } from './config.js';
 
 const v1 = new THREE.Vector3();
 const v2 = new THREE.Vector3();
@@ -34,12 +34,14 @@ function segDist(a, b, c) {
 }
 
 // How much a pass or shot along a→b would lose to the opponents standing near its line.
+// A defender on Hold covers a wider lane.
 export function laneCost(m, team, a, b) {
   let cost = 0;
   for (const q of m.teams[1 - team]) {
     if (q.role === 'GK') continue;
+    const r = 3.5 + (q.hold > 0 ? HOLD.reach : 0);
     const d = segDist(a, b, q.pos);
-    if (d < 3.5) cost += q.stat('BL') * (3.5 - d) * 1.6;
+    if (d < r) cost += q.stat('BL') * (r - d) * 1.6;
   }
   return cost;
 }
@@ -59,7 +61,7 @@ export function think(m, p, dt) {
   if (flying) {
     if (ball.target === p) {
       // Meet the pass instead of waiting for it.
-      v1.copy(ball.pos).addScaledVector(ball.vel, 0.15);
+      v1.copy(ball.pos).addScaledVector(ball.vel, 0.3);
       seek(p, v1, 0.5);
       p.sprint = true;
       return;
@@ -85,7 +87,7 @@ export function think(m, p, dt) {
 
   if (ball.state === 'loose') {
     if (m.chasers[p.team].includes(p)) {
-      v1.copy(ball.pos).addScaledVector(ball.vel, 0.35);
+      v1.copy(ball.pos).addScaledVector(ball.vel, 0.7);
       const d = seek(p, v1, 0.4);
       p.sprint = d > 4 && p.hp > p.maxHp * 0.3;
       return;
@@ -102,8 +104,10 @@ export function think(m, p, dt) {
     v1.copy(m.ownGoal(p.team)).sub(carrierP.pos).setLength(0.8).add(carrierP.pos);
     const d = seek(p, v1, 0.5);
     p.sprint = d > 5 && p.hp > p.maxHp * 0.4;
-    if (carrierP.pos.distanceTo(p.pos) < TACKLE_RANGE * 0.95 && p.tackleCd <= 0 && p.decisionCd <= 0) {
-      p.decisionCd = m.diff.react;
+    // While the human's carrier is in an encounter, the duel is settled by the wheel.
+    const waiting = m.encounter && m.encounter.player === carrierP;
+    if (!waiting && carrierP.pos.distanceTo(p.pos) < TACKLE_RANGE * 0.95 && p.tackleCd <= 0 && p.decisionCd <= 0) {
+      p.decisionCd = m.diff.react * AI_TEMPO;
       if (Math.random() < m.diff.aggression) m.tackle(p);
     }
     return;
@@ -145,7 +149,7 @@ function mark(m, p) {
       return;
     }
   }
-  const targetRole = MARKS[p.role];
+  const targetRole = m.marks[p.team][p.role];
   const opp = targetRole && m.teams[1 - p.team].find((q) => q.role === targetRole);
   if (!opp) return support(m, p, 'defend');
   v1.copy(m.ownGoal(p.team)).sub(opp.pos).setLength(2.2).add(opp.pos);
@@ -175,8 +179,9 @@ function carrier(m, p) {
   const { dist: pressure } = nearestOpponent(m, p);
   p.sprint = pressure < 5 && p.hp > p.maxHp * 0.45;
 
-  if (p.decisionCd > 0 || m.phase !== 'play') return;
-  p.decisionCd = 0.35 + m.diff.react + Math.random() * 0.4;
+  // Frozen mid-decision while the human's defender is choosing how to take us on.
+  if (p.decisionCd > 0 || m.phase !== 'play' || (m.encounter && m.encounter.foes.includes(p))) return;
+  p.decisionCd = (0.35 + m.diff.react + Math.random() * 0.4) * AI_TEMPO;
 
   const lane = laneCost(m, p.team, p.pos, goal) * 0.8;
   const odds = m.shotOdds(p, lane);
@@ -187,8 +192,8 @@ function carrier(m, p) {
     return;
   }
   // Speculative efforts keep keepers busy even when the odds are poor.
-  const hopeful = dist < range * 0.8 && Math.random() < 0.14;
-  if (dist < range && (odds > 0.2 || (odds > 0.05 && pressure < 2.4) || hopeful)) {
+  const hopeful = dist < range * 0.8 && Math.random() < 0.2;
+  if (dist < range && (odds > 0.15 || (odds > 0.05 && pressure < 2.4) || hopeful)) {
     m.shoot(p, false);
     return;
   }

@@ -18,6 +18,7 @@ export class Ball {
     this.special = false;    // a charged special shot
     this.travelled = 0;
     this.tried = new Set();  // defenders who already had a go at this pass/shot
+    this.startPower = 0;
 
     const tex = makeBallTexture();
     this.mesh = new THREE.Mesh(
@@ -69,9 +70,10 @@ export class Ball {
     this.lastTouch = from;
     this.vel.copy(vel);
     this.power = power;
+    this.startPower = power;
     this.travelled = 0;
     this.tried.clear();
-    if (from) from.grabCd = 0.45;
+    if (from) from.grabCd = 0.8;
   }
 
   loose(vel) {
@@ -91,7 +93,7 @@ export class Ball {
       this.travelled += this.vel.length() * dt;
       // A kickoff launch rises undamped from the floor of the sphere until it reaches the centre.
       if (this.launching && this.pos.y >= 0) this.launching = false;
-      if (this.state === 'loose' && !this.launching) this.vel.multiplyScalar(Math.exp(-dt * 1.1));
+      if (this.state === 'loose' && !this.launching) this.vel.multiplyScalar(Math.exp(-dt * 0.55));
       const lim = SPHERE_R - 0.5;
       const len = this.pos.length();
       if (len > lim) {
@@ -113,7 +115,7 @@ export class Ball {
 
     this.trailTimer -= dt;
     if (flying && this.trailTimer <= 0) {
-      this.trailTimer = 0.016;
+      this.trailTimer = 0.03;
       const s = this.trail[this.trailHead];
       s.position.copy(this.pos);
       s.visible = true;
@@ -123,7 +125,7 @@ export class Ball {
     }
     for (const s of this.trail) {
       if (!s.visible) continue;
-      s.userData.life -= dt * 3;
+      s.userData.life -= dt * 1.6;
       if (s.userData.life <= 0) { s.visible = false; continue; }
       s.material.opacity = s.userData.life * 0.7;
       s.scale.setScalar((this.special ? 1.8 : 0.9) * s.userData.life);

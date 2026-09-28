@@ -9,12 +9,26 @@ export const GOAL_INSET = 1.6;
 export const GOAL_RING_R = 3.6;
 export const GOAL_X = SPHERE_R - GOAL_INSET;
 
-export const PASS_SPEED = 21;
-export const SHOT_SPEED = 24;
+// Pace. Everything runs at about half the speed of an arcade sports game, so a pass
+// or shot can be watched in flight and there's time to read the play.
+export const SWIM_BASE = 2.3;        // top speed is SWIM_BASE + SP * SWIM_PER_SP
+export const SWIM_PER_SP = 0.18;
+export const PASS_SPEED = 10.5;
+export const SHOT_SPEED = 12;
+export const PASS_DECAY = 0.6;       // pass power lost per metre
+export const LAUNCH_SPEED = 12;      // kickoff launch from the floor
 export const CATCH_DIST = 1.35;
 export const PICKUP_DIST = 1.25;
 export const TACKLE_RANGE = 2.0;
-export const TACKLE_COOLDOWN = 1.1;
+export const TACKLE_COOLDOWN = 2.0;
+export const AI_TEMPO = 1.4;         // scales how often the AI makes decisions
+
+// Encounters: a defender whose radius touches the human's carrier opens the command
+// wheel in slow motion. Cooldowns are in game seconds; the wheel timer is real time.
+export const ENCOUNTER = { base: 2.5, perAT: 0.08, repeatCd: 6, globalCd: 3.5, commandCd: 0.6, wheelTime: 3 };
+export const SLOW = { wheel: 0.15, shot: 0.4, aiShot: 0.45, aiTackle: 0.35, overview: 0.3 };
+export const VENOM = { dps: 4, time: 9, cost: 8 };      // Venom Tackle: HP per second, seconds, HP it costs the user
+export const HOLD = { time: 3, reach: 1.8 };            // Hold: seconds, extra block reach
 
 // Shot power vs keeper grip. A shot starts at SH * SHOT_MULT + SHOT_BASE, loses
 // SHOT_DECAY per metre travelled and more to every defender who gets a touch.
@@ -38,19 +52,30 @@ export const MATCH_LENGTHS = [
   { id: 'long', label: '2 × 5 min', half: 300 },
 ];
 
-// Formation spots, written from the point of view of a team attacking +x.
-// x: along the pitch, y: up, z: across (left is +z).
-export const FORMATION = {
-  GK: [-SPHERE_R + 3.4, 0, 0],
-  LD: [-15, 3, 8],
-  RD: [-15, -3, -8],
-  MF: [-3, 0, 0],
-  LF: [9, 4, 9],
-  RF: [9, -4, -9],
+// Formation presets, written from the point of view of a team attacking +x.
+// x: along the pitch, y: up, z: across (left is +z). `push` and `drop` shift the
+// shape up or back with possession; `pressers` overrides how many chase the carrier.
+const GK_SPOT = [-SPHERE_R + 3.4, 0, 0];
+export const FORMATIONS = {
+  balanced: {
+    id: 'balanced', label: 'Balanced', blurb: 'Two up, two back, midfield free',
+    spots: { GK: GK_SPOT, LD: [-15, 3, 8], RD: [-15, -3, -8], MF: [-3, 0, 0], LF: [9, 4, 9], RF: [9, -4, -9] },
+    push: 8, drop: 5, pressers: null,
+  },
+  attack: {
+    id: 'attack', label: 'Attack', blurb: 'High line, two press the carrier',
+    spots: { GK: GK_SPOT, LD: [-9, 3, 9], RD: [-9, -3, -9], MF: [3, 0, 0], LF: [13, 4, 8], RF: [13, -4, -8] },
+    push: 9, drop: 3, pressers: 2,
+  },
+  wall: {
+    id: 'wall', label: 'Wall', blurb: 'Deep block in front of the keeper',
+    spots: { GK: GK_SPOT, LD: [-19, 2, 6], RD: [-19, -2, -6], MF: [-11, 0, 0], LF: [2, 4, 9], RF: [2, -4, -9] },
+    push: 6, drop: 6, pressers: 1,
+  },
 };
 
-// Which attacker each defender picks up when the other side has the ball.
-export const MARKS = { LD: 'RF', RD: 'LF', MF: 'MF' };
+// Which opponent each defender picks up when the other side has the ball.
+export const DEFAULT_MARKS = { LD: 'RF', RD: 'LF', MF: 'MF' };
 
 export const ROLES = ['LF', 'RF', 'MF', 'LD', 'RD', 'GK'];
 

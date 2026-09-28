@@ -2,52 +2,51 @@
 export class Input {
   constructor(canvas, touchRoot) {
     this.keys = new Set();
-    this.actions = [];          // edge-triggered: 'pass', 'shoot', 'special', 'switch', 'face', 'pause', 'mute'
-    this.look = { dx: 0, dy: 0 };
+    // Edge-triggered actions: 'command', 'click', 'shoot', 'special', 'switch', 'pause',
+    // 'escape', 'mute', 'confirm', 'back', 'num1'..'num5', 'navUp'/'navDown'/'navLeft'/'navRight'.
+    this.actions = [];
+    this.look = { dx: 0, dy: 0 };   // camera nudge from mouse or finger drags
     this.stick = { x: 0, y: 0 };
     this.touchUp = false;
     this.touchDown = false;
     this.touchSprint = false;
+    this.touchView = false;
     this.lastLookInput = 0;
     this.enabled = true;
 
     const bindings = {
-      KeyJ: 'pass', KeyK: 'shoot', KeyE: 'special', KeyQ: 'switch', KeyF: 'face',
-      KeyP: 'pause', Escape: 'pause', KeyM: 'mute',
+      KeyJ: 'command', KeyK: 'shoot', KeyE: 'special', KeyQ: 'switch',
+      KeyP: 'pause', Escape: 'escape', KeyM: 'mute',
+      Enter: 'confirm', NumpadEnter: 'confirm', Space: 'confirm', Backspace: 'back',
+      ArrowUp: 'navUp', ArrowDown: 'navDown', ArrowLeft: 'navLeft', ArrowRight: 'navRight',
     };
     addEventListener('keydown', (e) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
-      if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
-      if (!e.repeat && bindings[e.code]) this.actions.push(bindings[e.code]);
+      if (['Space', 'Tab', 'Backspace', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
+      if (!e.repeat) {
+        if (bindings[e.code]) this.actions.push(bindings[e.code]);
+        const digit = /^(Digit|Numpad)([1-5])$/.exec(e.code);
+        if (digit) this.actions.push('num' + digit[2]);
+      }
       this.keys.add(e.code);
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
-    addEventListener('blur', () => this.keys.clear());
+    addEventListener('blur', () => { this.keys.clear(); this.touchView = false; });
 
-    // Mouse: the first click captures the pointer; after that moving looks around,
-    // left button passes/tackles, right shoots, middle switches. Without pointer lock
-    // (some embeds refuse it) dragging still turns the camera.
+    // Mouse: left click opens the command wheel, right-drag nudges the camera (it
+    // springs back on release), middle click switches swimmer.
     let dragging = false;
-    const locked = () => document.pointerLockElement === canvas;
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     canvas.addEventListener('pointerdown', (e) => {
       if (e.pointerType !== 'mouse' || !this.enabled) return;
-      if (!locked()) {
-        dragging = true;
-        try {
-          const req = canvas.requestPointerLock?.();
-          if (req && req.catch) req.catch(() => {});
-        } catch { /* pointer lock is optional */ }
-        return;
-      }
       e.preventDefault();
-      if (e.button === 0) this.actions.push('pass');
-      if (e.button === 2) this.actions.push('shoot');
+      if (e.button === 0) this.actions.push('click');
+      if (e.button === 2) dragging = true;
       if (e.button === 1) this.actions.push('switch');
     });
-    addEventListener('pointerup', () => { dragging = false; });
+    addEventListener('pointerup', (e) => { if (e.button === 2 || e.pointerType !== 'mouse') dragging = false; });
     addEventListener('mousemove', (e) => {
-      if (locked() || (dragging && e.buttons)) {
+      if (dragging && e.buttons & 2) {
         this.look.dx += e.movementX;
         this.look.dy += e.movementY;
         this.lastLookInput = performance.now();
@@ -92,7 +91,7 @@ export class Input {
     stickEl.addEventListener('pointerup', endStick);
     stickEl.addEventListener('pointercancel', endStick);
 
-    // Drag anywhere on the canvas with a finger to turn the camera.
+    // Drag anywhere on the canvas with a finger to nudge the camera.
     const looks = new Map();
     canvas.addEventListener('pointerdown', (e) => {
       if (e.pointerType !== 'touch') return;
@@ -129,6 +128,7 @@ export class Input {
     hold('[data-hold="up"]', 'touchUp');
     hold('[data-hold="down"]', 'touchDown');
     hold('[data-hold="sprint"]', 'touchSprint');
+    hold('[data-hold="view"]', 'touchView');
   }
 
   // Movement intent in camera space: x strafe, y vertical, z forward.
@@ -150,7 +150,12 @@ export class Input {
     return this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.touchSprint;
   }
 
-  // Arrow keys turn the camera for keyboard-only play.
+  // Held for the wide overview from outside the sphere.
+  overview() {
+    return this.keys.has('Tab') || this.touchView;
+  }
+
+  // Arrow keys nudge the camera for keyboard-only play (when the wheel isn't open).
   keyLook(dt) {
     const k = this.keys;
     let yaw = 0;
@@ -160,7 +165,7 @@ export class Input {
     if (k.has('ArrowUp')) pitch += 1;
     if (k.has('ArrowDown')) pitch -= 1;
     if (yaw || pitch) this.lastLookInput = performance.now();
-    return { yaw: yaw * dt * 2.2, pitch: pitch * dt * 1.6 };
+    return { yaw: yaw * dt * 1.6, pitch: pitch * dt * 1.2 };
   }
 
   consumeLook() {

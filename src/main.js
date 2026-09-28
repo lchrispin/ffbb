@@ -1,10 +1,14 @@
 import * as THREE from './lib.js';
-import { SPHERE_R, TEAMS, MATCH_LENGTHS, DIFFICULTY } from './config.js';
+import { TEAMS, MATCH_LENGTHS, DIFFICULTY, FORMATIONS, ENCOUNTER, SLOW } from './config.js';
 import { buildArena } from './arena.js';
 import { Match } from './match.js';
 import { Input } from './input.js';
 import { Hud } from './hud.js';
 import { Sound } from './audio.js';
+import { Director } from './director.js';
+import { Wheel } from './wheel.js';
+import { Floaters } from './floaters.js';
+import { Lanes } from './lanes.js';
 
 const canvas = document.getElementById('game');
 let renderer;
@@ -28,6 +32,16 @@ document.body.classList.toggle('touch', isTouch);
 const input = new Input(canvas, document.getElementById('touch'));
 const hud = new Hud();
 const sound = new Sound();
+const director = new Director(camera);
+const floaters = new Floaters(document.getElementById('floaters'), camera);
+const lanes = new Lanes(scene);
+let hovered = null;   // wheel item under the cursor/selection
+const wheel = new Wheel(document.getElementById('wheel'), {
+  onHover(item) {
+    hovered = item;
+    if (match && match.encounter) match.passTarget = item && item.target ? item.target : null;
+  },
+});
 
 const ui = {
   menu: document.getElementById('menu'),
@@ -38,49 +52,39 @@ const ui = {
   intervalStats: document.getElementById('interval-stats'),
   intervalGo: document.getElementById('interval-go'),
   intervalMenu: document.getElementById('interval-menu'),
+  tactics: document.getElementById('tactics'),
+  formations: document.getElementById('formation-options'),
+  formationBlurb: document.getElementById('formation-blurb'),
+  marks: document.getElementById('marks'),
   mute: document.getElementById('mute'),
 };
 
 const settings = loadSettings();
 let match = null;
 let mode = 'attract';          // attract | play | paused | interval
-let lastEventGoalCam = 0;
+let goalCam = 0;
+let goalFocus = null;
+let gameTime = 0;
+let resolving = false;         // true while a wheel choice is being carried out
+let ballChain = [];            // power readings before each blocker's cut, for the ball tag
 
-// Camera rig: yaw/pitch describe where the controlled swimmer is looking.
-const rig = {
-  yaw: Math.PI / 2, pitch: 0, snap: null,
-  pos: new THREE.Vector3(0, 0, 40), look: new THREE.Vector3(), orbit: 0,
-};
-const aim = new THREE.Vector3();
-const right = new THREE.Vector3();
-const tmp = new THREE.Vector3();
+// Movement is camera-relative. When the camera cuts, the old mapping is kept until
+// the stick or keys are released, so a held direction doesn't suddenly change.
+const moveBasis = { active: false, cuts: 0, fwd: new THREE.Vector3(0, 0, -1), right: new THREE.Vector3(1, 0, 0) };
 const up = new THREE.Vector3(0, 1, 0);
-
-function aimDir(out, yaw, pitch) {
-  return out.set(Math.cos(pitch) * Math.sin(yaw), Math.sin(pitch), Math.cos(pitch) * Math.cos(yaw));
-}
-
-function yawPitchTo(from, to) {
-  tmp.subVectors(to, from).normalize();
-  return { yaw: Math.atan2(tmp.x, tmp.z), pitch: Math.asin(THREE.MathUtils.clamp(tmp.y, -1, 1)) * 0.6 };
-}
-
-function wrap(a) {
-  while (a > Math.PI) a -= Math.PI * 2;
-  while (a < -Math.PI) a += Math.PI * 2;
-  return a;
-}
 
 // ---------- match lifecycle ----------
 
 function newMatch(opts) {
   if (match) match.dispose();
+  wheel.close();
+  floaters.clear();
+  lanes.hide();
   match = new Match(scene, opts, onEvent);
   arena.goals[0].setColor(match.teamDefs[0].color);
   arena.goals[1].setColor(match.teamDefs[1].color);
   hud.setTeams(match.teamDefs);
-  rig.yaw = Math.PI / 2;
-  rig.pitch = 0;
+  director.cut();
 }
 
 function startAttract() {
@@ -104,37 +108,24 @@ function startMatch() {
   ui.interval.hidden = true;
   ui.pause.hidden = true;
   hud.show(true);
+  hud.callout('1st half', 'Ball launches from the floor of the sphere', 'neutral', 2.2);
   document.body.classList.add('playing');
-  if (!isTouch) requestLock();
-}
-
-function requestLock() {
-  try {
-    const r = canvas.requestPointerLock?.();
-    if (r && r.catch) r.catch(() => {});
-  } catch { /* optional */ }
 }
 
 function setPaused(on) {
   if (on && mode === 'play') {
     mode = 'paused';
     ui.pause.hidden = false;
-    if (document.pointerLockElement) document.exitPointerLock();
   } else if (!on && mode === 'paused') {
     mode = 'play';
     ui.pause.hidden = true;
-    if (!isTouch) requestLock();
   }
 }
 
-document.addEventListener('pointerlockchange', () => {
-  // Losing the pointer mid-match (Esc) pauses, like most desktop games.
-  if (!document.pointerLockElement && mode === 'play' && match && match.phase !== 'halftime' && match.phase !== 'fulltime') setPaused(true);
-});
-
 function showInterval(final) {
   mode = 'interval';
-  if (document.pointerLockElement) document.exitPointerLock();
+  wheel.close();
+  lanes.hide();
   const [a, b] = match.teamDefs;
   const [sa, sb] = match.score;
   let title = 'Half time';
@@ -153,17 +144,53 @@ function showInterval(final) {
   ];
   ui.intervalStats.innerHTML = rows.map(([k, x, y]) => `<tr><td>${x}</td><th>${k}</th><td>${y}</td></tr>`).join('');
   ui.intervalGo.textContent = final ? 'Rematch' : 'Start 2nd half';
+  ui.tactics.hidden = final;
+  if (!final) buildTactics();
   ui.interval.hidden = false;
   ui.intervalGo.focus();
+}
+
+// Half-time tactics: a formation preset and who each of your defenders marks.
+function buildTactics() {
+  const t = match.humanTeam;
+  const cur = match.formation[t].id;
+  ui.formations.innerHTML = Object.values(FORMATIONS).map((f) =>
+    `<label class="seg"><input type="radio" name="formation" value="${f.id}" ${f.id === cur ? 'checked' : ''}><span>${f.label}</span></label>`).join('');
+  const blurb = () => {
+    const f = FORMATIONS[ui.formations.querySelector('input:checked').value];
+    ui.formationBlurb.textContent = f.blurb;
+  };
+  ui.formations.querySelectorAll('input').forEach((el) => el.addEventListener('change', blurb));
+  blurb();
+  const opp = match.teams[1 - t].filter((q) => q.role !== 'GK');
+  const mine = match.teams[t].filter((p) => p.role in match.marks[t]);
+  ui.marks.innerHTML = mine.map((p) => `
+    <label class="mark-row"><span>${p.name} <small>${p.role}</small></span>
+      <select data-role="${p.role}">${opp.map((q) => `<option value="${q.role}" ${match.marks[t][p.role] === q.role ? 'selected' : ''}>${q.name} · ${q.role}</option>`).join('')}</select>
+    </label>`).join('');
+}
+
+function applyTactics() {
+  const t = match.humanTeam;
+  const f = ui.formations.querySelector('input:checked');
+  const marks = { ...match.marks[t] };
+  ui.marks.querySelectorAll('select').forEach((el) => { marks[el.dataset.role] = el.value; });
+  match.setTactics(t, f ? f.value : 'balanced', marks);
+  // The AI answers the scoreline: chase the game when behind, sit deep when well ahead.
+  const ai = 1 - t;
+  const diff = match.score[ai] - match.score[t];
+  const pick = diff < 0 ? 'attack' : diff >= 2 ? 'wall' : 'balanced';
+  match.setTactics(ai, pick);
+  hud.log(`${match.teamDefs[ai].short} go ${FORMATIONS[pick].label.toLowerCase()} for the 2nd half`);
 }
 
 ui.intervalGo.addEventListener('click', () => {
   sound.start();
   if (match.phase === 'fulltime') { startMatch(); return; }
+  applyTactics();
   ui.interval.hidden = true;
   match.startSecondHalf();
   mode = 'play';
-  if (!isTouch) requestLock();
 });
 ui.intervalMenu.addEventListener('click', startAttract);
 document.getElementById('resume').addEventListener('click', () => setPaused(false));
@@ -220,6 +247,31 @@ function buildMenu() {
 
 // ---------- events from the match ----------
 
+// Tone from the human's point of view: good when `team` is the human's side.
+function tone(team) {
+  return team === match.humanTeam ? 'good' : 'bad';
+}
+
+function openWheel(e) {
+  const opts = match.commandOptions();
+  const carrier = match.ball.owner;
+  const names = e.foes.slice(0, 3).map((q) => q.name).join(', ');
+  const sub = e.kind === 'attack'
+    ? (e.foes.length ? `${names} closing in` : 'No one close')
+    : (carrier && carrier.team !== match.humanTeam ? `${carrier.name} has the ball` : 'The ball is free');
+  wheel.open(
+    { title: e.manual ? 'Command' : 'Encounter', sub, kind: e.kind, options: opts },
+    (choice) => {
+      resolving = true;
+      match.resolveCommand(choice);
+      resolving = false;
+    },
+    () => match.defaultCommand(),
+    ENCOUNTER.wheelTime,
+  );
+  if (!e.manual) sound.thump(0.5, 1.8);
+}
+
 function onEvent(type, d) {
   if (!match || mode === 'attract') {
     if (type === 'goal') arena.goals[d.team === 0 ? 1 : 0].flash();
@@ -229,75 +281,108 @@ function onEvent(type, d) {
   switch (type) {
     case 'kickoff':
       hud.callout(d.half === 1 ? '1st half' : '2nd half', 'Ball launches from the floor of the sphere', 'neutral', 2.2);
-      rig.snap = null;
-      rig.yaw = Math.PI / 2;
-      rig.pitch = 0;
-      rig.cut = true;
+      wheel.close();
+      floaters.clear();
+      director.cut();
       break;
     case 'whistle':
       sound.whistle(d.long);
       break;
+    case 'encounter':
+      openWheel(d);
+      break;
+    case 'encounterEnd':
+      wheel.close();
+      lanes.hide();
+      break;
     case 'pass':
       sound.bubbles(3);
+      ballChain = [];
       break;
     case 'shot':
       sound.thump(d.special ? 1.6 : 1, d.special ? 0.6 : 1);
+      ballChain = [];
+      floaters.pop(`SH ${Math.round(d.from.stat('SH'))} → <b>${Math.round(d.power)}</b>`, d.from, { tone: tone(d.from.team), size: 'lg' });
+      if (mine(d.from.team)) {
+        match.slow('shot', SLOW.shot);
+      } else if (!resolving) {
+        // AI moment: a lighter slow-down so you can see the shot coming.
+        match.slow('aiShot', SLOW.aiShot, 1.2);
+        if (!d.special) hud.callout(`${d.from.name} shoots`, `power ${Math.round(d.power)}`, 'bad', 1.2, 'small');
+      }
       if (d.special) {
-        hud.callout('Jecht Shot', `${d.from.name} · power ${Math.round(d.power)}`, mine(d.from.team) ? 'good' : 'bad', 1.6);
+        hud.callout('Jecht Shot', `${d.from.name} · power ${Math.round(d.power)}`, tone(d.from.team), 1.6);
         match.excitement = Math.max(match.excitement, 0.7);
       }
-      hud.log(`${d.from.name} shoots · power ${Math.round(d.power)}`, mine(d.from.team) ? 'good' : 'bad');
+      hud.log(`${d.from.name} shoots · power ${Math.round(d.power)}`, tone(d.from.team));
       break;
     case 'goal': {
       arena.goals[d.team === 0 ? 1 : 0].flash();
       sound.chime(mine(d.team));
       sound.thump(1.4, 0.5);
       const who = d.by ? (d.ownGoal ? `Own goal · ${d.by.name}` : d.by.name) : '';
-      hud.callout('Goal!', `${match.teamDefs[d.team].name} · ${who}`, mine(d.team) ? 'good' : 'bad', 3.2);
-      hud.log(`Goal for ${match.teamDefs[d.team].short} · ${who}`, mine(d.team) ? 'good' : 'bad');
-      lastEventGoalCam = 3.4;
-      rig.goalFocus = d.by || null;
+      hud.callout('Goal!', `${match.teamDefs[d.team].name} · ${who}`, tone(d.team), 3.2);
+      hud.log(`Goal for ${match.teamDefs[d.team].short} · ${who}`, tone(d.team));
+      goalCam = 3.4;
+      goalFocus = d.by || null;
       break;
     }
     case 'save':
       sound.thump(0.8, 1.4);
-      hud.callout('Save', `${d.keeper.name} · grip ${d.grip} beats power ${d.power}`, mine(d.keeper.team) ? 'good' : 'bad', 1.4);
-      hud.log(`${d.keeper.name} saves (${d.grip} vs ${d.power})`, mine(d.keeper.team) ? 'good' : 'bad');
+      floaters.pop(`GRIP <b>${d.grip}</b> vs ${d.power}<br><em>Save</em>`, d.keeper, { tone: tone(d.keeper.team), size: 'lg', life: 2.2 });
+      hud.callout('Save', d.keeper.name, tone(d.keeper.team), 1.4, 'small');
+      hud.log(`${d.keeper.name} saves (${d.grip} vs ${d.power})`, tone(d.keeper.team));
       break;
     case 'beaten':
-      hud.log(`${d.keeper.name} beaten · ${d.power} past grip ${d.grip}`, mine(d.keeper.team) ? 'bad' : 'good');
+      floaters.pop(`GRIP ${d.grip} vs <b>${d.power}</b><br><em>Beaten</em>`, d.keeper, { tone: tone(1 - d.keeper.team), size: 'lg', life: 2.2 });
+      hud.log(`${d.keeper.name} beaten · ${d.power} past grip ${d.grip}`, tone(1 - d.keeper.team));
       break;
     case 'block':
     case 'intercept':
       sound.thump(0.6, 1.6);
-      hud.callout(type === 'block' ? 'Blocked' : 'Intercepted', d.by.name, mine(d.by.team) ? 'good' : 'bad', 1.1);
-      hud.log(`${d.by.name} ${type === 'block' ? 'blocks the shot' : 'intercepts'}`, mine(d.by.team) ? 'good' : 'bad');
+      floaters.pop(`${d.a} vs ${d.b}<br>${d.before} → <b>0</b>`, d.by, { tone: tone(d.by.team), size: 'lg' });
+      hud.callout(type === 'block' ? 'Blocked' : 'Intercepted', d.by.name, tone(d.by.team), 1.1, 'small');
+      hud.log(`${d.by.name} ${type === 'block' ? 'blocks the shot' : 'intercepts'}`, tone(d.by.team));
       break;
     case 'deflect':
-      hud.log(`${d.by.name} gets a touch · −${d.cut}, ${d.left} left`, mine(d.by.team) ? 'good' : 'bad');
+      ballChain.push(d.before);
+      floaters.pop(`${d.a} vs ${d.b}<br><b>−${d.cut}</b>`, d.by, { tone: tone(d.by.team) });
+      hud.log(`${d.by.name} gets a touch · −${d.cut}, ${d.left} left`, tone(d.by.team));
       break;
     case 'knockback':
-      hud.log(`${d.on.name} is knocked aside`, mine(d.on.team) ? 'bad' : 'good');
+      floaters.pop('<em>Knocked aside</em>', d.on, { tone: tone(1 - d.on.team) });
+      hud.log(`${d.on.name} is knocked aside`, tone(1 - d.on.team));
       break;
     case 'fizzle':
       hud.log('The shot runs out of power');
       break;
+    case 'duel':
+      // "AT 9 vs EN 7" over the carrier, and who came out on top.
+      floaters.pop(`${d.a} vs ${d.b}<br><em>${d.won ? 'Tackle' : 'Break'}</em>`, d.def, { tone: d.won ? tone(d.att.team) : tone(d.def.team), size: 'lg' });
+      break;
+    case 'venom':
+      floaters.pop('<em>Venom</em>', d.on, { tone: 'venom', dy: 2.6 });
+      hud.log(`${d.by.name} uses Venom Tackle on ${d.on.name}`, tone(d.by.team));
+      break;
+    case 'hold':
+      floaters.pop('<em>Hold</em>', d.by, { tone: 'good' });
+      break;
     case 'tackle':
       sound.thump(0.9, 0.8);
-      hud.callout('Tackle', `${d.by.name} on ${d.on.name}`, mine(d.by.team) ? 'good' : 'bad', 1.1);
-      hud.log(`${d.by.name} wins it from ${d.on.name}`, mine(d.by.team) ? 'good' : 'bad');
+      hud.callout('Tackle', `${d.by.name} on ${d.on.name}`, tone(d.by.team), 1.1, 'small');
+      hud.log(`${d.by.name} wins it from ${d.on.name}`, tone(d.by.team));
+      if (mine(d.on.team) && !resolving) match.slow('aiTackle', SLOW.aiTackle, 0.8);
       break;
     case 'breakthrough':
-      hud.log(`${d.by.name} breaks the tackle`, mine(d.by.team) ? 'good' : 'bad');
+      hud.log(`${d.by.name} breaks the tackle`, tone(d.by.team));
+      if (mine(d.by.team) && !resolving) {
+        match.slow('aiTackle', SLOW.aiTackle, 0.6);
+        hud.callout('Break!', `${d.by.name} shrugs off ${d.on.name}`, 'good', 1, 'small');
+      }
       break;
     case 'overdrive':
-      if (mine(d.team)) hud.log(isTouch ? 'Jecht Shot ready' : 'Jecht Shot ready · press E with the ball', 'good');
+      if (mine(d.team)) hud.log(isTouch ? 'Jecht Shot ready' : 'Jecht Shot ready · E, or Tech on the wheel', 'good');
       else hud.log(`${match.teamDefs[d.team].short} have a Jecht Shot charged`, 'bad');
-      break;
-    case 'possession':
-      if (d.player.team === match.humanTeam && d.player === match.human) {
-        rig.snap = yawPitchTo(d.player.pos, match.attackGoal(match.humanTeam));
-      }
       break;
     case 'halftime':
       setTimeout(() => showInterval(false), 1200);
@@ -313,55 +398,52 @@ function onEvent(type, d) {
 function controlHuman(dt) {
   const h = match.human;
   const look = input.consumeLook();
-  const kl = input.keyLook(dt);
-  const sens = 0.0028;
-  rig.yaw -= look.dx * sens + kl.yaw;
-  rig.pitch -= look.dy * sens - kl.pitch;
-  if (look.dx || look.dy || kl.yaw || kl.pitch) rig.snap = null;
-  if (rig.snap) {
-    rig.yaw += wrap(rig.snap.yaw - rig.yaw) * Math.min(1, dt * 6);
-    rig.pitch += (rig.snap.pitch - rig.pitch) * Math.min(1, dt * 6);
-    if (Math.abs(wrap(rig.snap.yaw - rig.yaw)) < 0.01) rig.snap = null;
-  }
-  rig.pitch = THREE.MathUtils.clamp(rig.pitch, -1.3, 1.3);
-
   const actions = input.consumeActions();
+  if (!wheel.isOpen) {
+    const kl = input.keyLook(dt);
+    director.addNudge(-look.dx * 0.004 - kl.yaw, -look.dy * 0.003 + kl.pitch);
+  } else if (look.dx || look.dy) director.addNudge(-look.dx * 0.004, -look.dy * 0.003);
+
   for (const a of actions) {
     if (a === 'pause') { setPaused(true); return; }
     if (a === 'mute') updateMute(sound.toggleMute());
   }
+  if (wheel.isOpen) {
+    for (const a of actions) wheel.handle(a);
+  } else if (actions.includes('escape')) { setPaused(true); return; }
+
+  const view = input.overview() && match.phase === 'play';
+  if (view) match.slow('overview', SLOW.overview);
+  else match.unslow('overview');
+
   if (!h || match.phase !== 'play') {
     if (h) h.desired.set(0, 0, 0);
     return;
   }
 
-  aimDir(aim, rig.yaw, rig.pitch);
-  right.set(-Math.cos(rig.yaw), 0, Math.sin(rig.yaw));
   const mv = input.move();
+  const moving = Math.hypot(mv.x, mv.z) > 0.05;
+  if (!moving) moveBasis.active = false;
+  else if (!moveBasis.active || moveBasis.cuts === director.cuts) {
+    // Track the camera while it only turns slowly; freeze the mapping across a cut.
+    director.basis(moveBasis.fwd, moveBasis.right);
+    moveBasis.cuts = director.cuts;
+    moveBasis.active = true;
+  }
   h.desired.set(0, 0, 0)
-    .addScaledVector(aim, mv.z)
-    .addScaledVector(right, mv.x)
+    .addScaledVector(moveBasis.fwd, mv.z)
+    .addScaledVector(moveBasis.right, mv.x)
     .addScaledVector(up, mv.y);
   if (h.desired.lengthSq() > 1) h.desired.normalize();
   h.sprint = input.sprinting();
-  h.aimHint = aim;
 
-  // Strafing with no manual look input slowly swings the camera round, so A/D
-  // (or the touch stick) work as steering for keyboard-only and phone players.
-  const idleLook = performance.now() - input.lastLookInput > 700;
-  const horiz = Math.hypot(h.vel.x, h.vel.z);
-  if (idleLook && Math.abs(mv.x) > 0.1 && horiz > 1.5) {
-    const target = Math.atan2(h.vel.x, h.vel.z);
-    rig.yaw += wrap(target - rig.yaw) * Math.min(1, dt * 1.4 * Math.abs(mv.x));
-  }
-  if (match.ball.owner === h && h.desired.lengthSq() < 0.01) h.facing.lerp(aim, Math.min(1, dt * 5)).normalize();
-
+  if (wheel.isOpen) return;
   const hasBall = match.ball.owner === h;
   for (const a of actions) {
     switch (a) {
-      case 'pass':
-        if (hasBall) match.pass(h, match.passTarget);
-        else match.tackle(h);
+      case 'command':
+      case 'click':
+        match.openCommand();
         break;
       case 'shoot':
         if (hasBall) match.shoot(h, false);
@@ -373,46 +455,61 @@ function controlHuman(dt) {
       case 'switch':
         match.switchHuman();
         break;
-      case 'face':
-        rig.snap = hasBall ? yawPitchTo(h.pos, match.attackGoal(h.team)) : yawPitchTo(h.pos, match.ball.pos);
-        break;
     }
   }
 }
 
-function updateCamera(dt, time) {
-  let target;
-  let desired;
-  const ease = 1 - Math.exp(-dt * 7);
-  if (mode === 'attract' || mode === 'interval' || !match.human) {
-    // Slow orbit outside the sphere to show off the pool.
-    rig.orbit += dt * 0.08;
-    desired = tmp.set(Math.cos(rig.orbit) * 58, 14 + Math.sin(rig.orbit * 0.7) * 8, Math.sin(rig.orbit) * 58);
-    target = new THREE.Vector3(0, -2, 0);
-  } else if (lastEventGoalCam > 0 && match.phase === 'goal') {
-    // Goal replay-ish angle: circle the scorer.
-    const focus = rig.goalFocus ? rig.goalFocus.pos : match.ball.pos;
-    const a = time * 0.9;
-    desired = tmp.set(Math.cos(a) * 7, 2.5, Math.sin(a) * 7).add(focus);
-    target = focus.clone();
-  } else {
-    const h = match.human;
-    aimDir(aim, rig.yaw, rig.pitch);
-    desired = tmp.copy(h.pos).addScaledVector(aim, -6.2).addScaledVector(up, 1.5);
-    target = h.pos.clone().addScaledVector(aim, 6);
+// Shot slow motion lasts until the shot is over, then eases out.
+function updateSlowTails() {
+  const s = match.slows.get('shot');
+  if (s && s.t === Infinity && match.ball.state !== 'shot') match.slow('shot', SLOW.shot, 0.5);
+}
+
+// Encounter bubbles round the defenders near the human's carrier, and Hold rings.
+function updateRings() {
+  for (const p of match.players) p.setRing(0, 0, 0);
+  if (mode === 'attract' || !match.human || match.phase !== 'play') return;
+  const h = match.human;
+  const owner = match.ball.owner;
+  if (owner === h) {
+    for (const q of match.teams[1 - h.team]) {
+      if (q.role === 'GK') continue;
+      const gap = q.pos.distanceTo(h.pos) - q.encRadius;
+      if (gap > 9) continue;
+      const a = THREE.MathUtils.clamp(1 - gap / 9, 0, 1);
+      const spent = q.encCd > 0 || q.stun > 0;
+      const soft = match.encounter ? 0.5 : 1;
+      q.setRing(q.encRadius, spent ? 0x9cc3cf : gap < 0 ? 0xff5a3c : 0xff9a66, (spent ? 0.12 : 0.38) * a * soft);
+    }
+  } else if (owner && owner.team !== h.team) {
+    h.setRing(h.encRadius, 0x7ff3ff, 0.28);
   }
-  const lim = SPHERE_R - 0.7;
-  const outside = mode === 'attract' || mode === 'interval' || !match.human;
-  if (!outside && desired.length() > lim) desired.setLength(lim);
-  if (rig.cut) {
-    rig.cut = false;
-    rig.pos.copy(desired);
-    rig.look.copy(target);
+  for (const p of match.players) if (p.hold > 0) p.setRing(match.blockReach(p), 0x3fd0e8, 0.55);
+}
+
+// Passing lanes during an attacking encounter, coloured by the wheel's odds.
+function updateLanes() {
+  const e = match.encounter;
+  const pass = wheel.isOpen && e && e.kind === 'attack' ? wheel.options.find((o) => o.id === 'pass') : null;
+  if (!pass) { lanes.hide(); return; }
+  const hot = hovered && hovered.target;
+  lanes.update(pass.sub.filter((it) => it.target.role !== 'GK' || it.target === hot)
+    .map((it) => ({ from: e.player, to: it.target, odds: it.odds, hot: it.target === hot })), gameTime);
+}
+
+// Power tag riding on a pass or shot (84 → 61 → 40), and Venom tags.
+function updateTags() {
+  const b = match.ball;
+  if (mode !== 'attract' && (b.state === 'pass' || b.state === 'shot')) {
+    const live = Math.max(0, Math.round(b.power));
+    const html = [...ballChain.map((n) => `<s>${n}</s>`), `<b>${live}</b>`].join(' → ');
+    floaters.tag('ball', b, html, { tone: b.state === 'shot' ? 'shot' : 'pass', dy: 0.7, size: b.state === 'shot' ? 'md' : 'sm' });
+  } else floaters.untag('ball');
+  for (const p of match.players) {
+    const key = `venom${p.team}-${p.index}`;
+    if (p.venom > 0 && mode !== 'attract') floaters.tag(key, p, 'Venom', { tone: 'venom', dy: 1.85, size: 'xs' });
+    else floaters.untag(key);
   }
-  rig.pos.lerp(desired, ease);
-  rig.look.lerp(target, ease);
-  camera.position.copy(rig.pos);
-  camera.lookAt(rig.look);
 }
 
 function resize() {
@@ -426,31 +523,46 @@ function resize() {
 addEventListener('resize', resize);
 
 const clock = new THREE.Clock();
-let elapsed = 0;
 function frame() {
-  const dt = Math.min(0.05, clock.getDelta());
-  elapsed += dt;
-  lastEventGoalCam = Math.max(0, lastEventGoalCam - dt);
+  const dt = Math.min(0.05, clock.getDelta());   // real time
+  goalCam = Math.max(0, goalCam - dt);
 
   if (mode === 'play') controlHuman(dt);
   else {
     const acts = input.consumeActions();
     input.consumeLook();
-    if (mode === 'paused' && acts.includes('pause')) setPaused(false);
+    if (mode === 'paused' && (acts.includes('pause') || acts.includes('escape'))) setPaused(false);
   }
 
-  if (mode !== 'paused') match.update(dt);
-  arena.update(dt, elapsed, camera, match.excitement);
+  if (mode !== 'paused') {
+    match.update(dt);
+    if (mode === 'play') {
+      wheel.update(dt);
+      updateSlowTails();
+    }
+  }
+  // The world animates on game time, so slow motion slows everything in the sphere.
+  const gdt = mode === 'paused' ? 0 : dt * match.timeScale;
+  gameTime += gdt;
+  director.update(mode === 'paused' ? 0 : dt, match, {
+    mode, overview: mode === 'play' && input.overview(), goalCam: goalCam > 0,
+    trackShot: mode === 'play', focusPlayer: goalFocus, time: gameTime,
+  });
+  arena.update(gdt, gameTime, camera, match.excitement);
   if (mode !== 'attract') sound.crowd(match.excitement);
-  for (const p of match.players) p.updateVisual(dt, elapsed, camera);
-  updateCamera(dt, elapsed);
-  if (mode === 'play' || mode === 'paused') hud.update(dt, match, isTouch);
+  for (const p of match.players) p.updateVisual(gdt, gameTime, camera);
+  updateRings();
+  updateLanes();
+  updateTags();
+  document.body.classList.toggle('overview', director.shot === 'overview');
+  floaters.update(mode === 'paused' ? 0 : dt);
+  if (mode === 'play' || mode === 'paused') hud.update(dt, match, isTouch, wheel.isOpen);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
 
 // Handy for poking at a running match from the dev console.
-window.ffbb = { get match() { return match; }, scene, camera };
+window.ffbb = { get match() { return match; }, scene, camera, director, wheel, input };
 
 buildMenu();
 updateMute(false);

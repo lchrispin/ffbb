@@ -22,6 +22,7 @@
     --ember: #ff7a3a;
     --good: #67e6a4;
     --bad: #ff6b5e;
+    --venom: #9be45a;
     --display: 'Marcellus SC', 'Trajan Pro', Georgia, serif;
     --ui: 'Barlow Semi Condensed', 'Arial Narrow', 'Roboto Condensed', sans-serif;
   }
@@ -165,6 +166,11 @@
   }
   .co-main { font: 400 clamp(40px, 9vw, 76px)/1 var(--display); letter-spacing: 0.04em; text-shadow: 0 4px 30px rgba(0,0,0,0.6); }
   .co-sub { font: 600 16px/1.2 var(--ui); letter-spacing: 0.08em; color: var(--mist); text-transform: uppercase; text-shadow: 0 2px 10px rgba(0,0,0,0.8); }
+  #callout[data-size="small"] { top: calc(92px + env(safe-area-inset-top, 0px)); transform: translate(-50%, 0); }
+  #callout[data-size="small"].pop { animation: pop-small 0.35s ease-out; }
+  @keyframes pop-small { from { transform: translate(-50%, -8px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+  #callout[data-size="small"] .co-main { font-size: clamp(26px, 5vw, 40px); }
+  #callout[data-size="small"] .co-sub { font-size: 14px; }
   #callout[data-tone="good"] .co-main { color: var(--gold); }
   #callout[data-tone="bad"] .co-main { color: var(--bad); }
   #callout.pop { animation: pop 0.45s cubic-bezier(.2, 1.6, .4, 1); }
@@ -185,6 +191,12 @@
   #od-fill[data-state="full"] { background: linear-gradient(90deg, var(--ember), var(--gold)); animation: glow 0.8s ease-in-out infinite alternate; }
   @keyframes glow { to { filter: brightness(1.5); } }
   .meter-label { display: flex; justify-content: space-between; font-size: 12px; color: var(--mist); font-variant-numeric: tabular-nums; }
+  #card-status:empty { display: none; }
+  #card-status {
+    font: 700 11px/1 var(--ui); letter-spacing: 0.12em; text-transform: uppercase; padding: 3px 6px; border-radius: 3px;
+    background: rgba(63, 208, 232, 0.2); color: var(--tide); justify-self: start;
+  }
+  #card-status[data-tone="venom"] { background: rgba(120, 220, 90, 0.2); color: var(--venom); }
   #card-stats { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; margin: 0; text-align: center; }
   #card-stats div { display: grid; }
   #card-stats dt { font-size: 10px; letter-spacing: 0.1em; color: var(--mist); }
@@ -200,6 +212,109 @@
 
   .hud-buttons { position: absolute; top: calc(152px + env(safe-area-inset-top, 0px)); right: 16px; display: flex; gap: 6px; pointer-events: auto; }
   .hud-buttons .btn { padding: 6px 10px; font-size: 13px; }
+
+  /* ---------- floating numbers ---------- */
+  #floaters { position: fixed; inset: 0; pointer-events: none; z-index: 4; overflow: hidden; }
+  .fl {
+    position: absolute; left: 0; top: 0; white-space: nowrap; text-align: center;
+    font: 700 15px/1.1 var(--ui); font-variant-numeric: tabular-nums; letter-spacing: 0.03em;
+    color: var(--foam); text-shadow: 0 1px 2px #000, 0 0 8px rgba(0,0,0,0.85);
+    will-change: transform;
+  }
+  .fl b { font-size: 1.3em; }
+  .fl em { font: 700 0.95em/1.2 var(--ui); font-style: normal; text-transform: uppercase; letter-spacing: 0.14em; }
+  .fl s { text-decoration: line-through; text-decoration-thickness: 2px; opacity: 0.6; }
+  .fl-xs { font-size: 11px; }
+  .fl-sm { font-size: 13px; }
+  .fl-lg { font-size: 18px; }
+  .fl[data-tone="good"] { color: #ffe29a; }
+  .fl[data-tone="good"] b, .fl[data-tone="good"] em { color: var(--gold); }
+  .fl[data-tone="bad"] b, .fl[data-tone="bad"] em { color: var(--bad); }
+  .fl[data-tone="venom"] { color: var(--venom); }
+  .fl-tag { padding: 2px 7px; border-radius: 10px; background: rgba(3, 16, 25, 0.62); border: 1px solid var(--panel-edge); }
+  .fl-tag[data-tone="shot"] { border-color: var(--gold); }
+  .fl-tag[data-tone="shot"] b { color: var(--gold); }
+  .fl-tag[data-tone="pass"] b { color: var(--tide); }
+  .fl-tag[data-tone="venom"] { border-color: var(--venom); letter-spacing: 0.1em; text-transform: uppercase; }
+
+  /* ---------- command wheel ---------- */
+  #wheel {
+    position: fixed; z-index: 8; right: 24px; bottom: 64px; pointer-events: auto;
+    font-variant-numeric: tabular-nums;
+  }
+  .wh-dial {
+    display: grid; gap: 8px; align-items: center; justify-items: center;
+    grid-template-columns: 186px 96px 186px;
+    grid-template-areas: "head head head" ". up ." "left hub right" ". down .";
+  }
+  .wh-dial .wh-head { grid-area: head; }
+  .wh-head { display: grid; justify-items: center; gap: 2px; margin-bottom: 2px; text-shadow: 0 2px 8px #000; }
+  .wh-head b { font: 400 26px/1 var(--display); color: var(--gold); letter-spacing: 0.06em; }
+  .wh-head span { font-size: 13px; color: var(--foam); letter-spacing: 0.08em; text-transform: uppercase; }
+  .wh-petal {
+    width: 186px; min-height: 62px; padding: 7px 10px; display: grid; gap: 3px; text-align: left; cursor: pointer;
+    background: rgba(4, 22, 34, 0.88); border: 1px solid var(--panel-edge); border-radius: 10px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.4); transition: transform 0.1s, border-color 0.1s, background 0.1s;
+  }
+  .wh-petal[data-slot="up"] { grid-area: up; }
+  .wh-petal[data-slot="right"] { grid-area: right; }
+  .wh-petal[data-slot="down"] { grid-area: down; }
+  .wh-petal[data-slot="left"] { grid-area: left; }
+  .wh-petal.sel, .wh-petal:hover { border-color: var(--gold); background: rgba(40, 32, 8, 0.92); transform: scale(1.04); }
+  .wh-petal[aria-disabled="true"] { opacity: 0.45; cursor: default; transform: none; }
+  .wh-top { display: flex; align-items: center; gap: 7px; }
+  .wh-label { font: 400 18px/1 var(--display); flex: 1; letter-spacing: 0.03em; }
+  .wh-top b, .wh-row > b { font: 700 19px/1 var(--ui); }
+  [data-tone="good"] > .wh-top b, .wh-row[data-tone="good"] > b { color: var(--good); }
+  [data-tone="fair"] > .wh-top b, .wh-row[data-tone="fair"] > b { color: var(--gold); }
+  [data-tone="bad"] > .wh-top b, .wh-row[data-tone="bad"] > b { color: var(--bad); }
+  .wh-detail { font-size: 12px; color: var(--mist); line-height: 1.2; }
+  .wh-hub {
+    grid-area: hub; width: 92px; height: 92px; border-radius: 50%; display: grid; place-content: center; text-align: center;
+    --t: 1;
+    background:
+      radial-gradient(circle, rgba(4, 22, 34, 0.94) 60%, transparent 61%),
+      conic-gradient(var(--gold) calc(var(--t) * 360deg), rgba(255,255,255,0.12) 0);
+  }
+  .wh-clock { font: 700 22px/1 var(--ui); }
+  .wh-hub small { font-size: 10px; color: var(--mist); letter-spacing: 0.06em; text-transform: uppercase; max-width: 70px; }
+  .wh-panel {
+    width: 340px; display: grid; gap: 5px; padding: 12px; background: rgba(4, 22, 34, 0.9);
+    border: 1px solid var(--panel-edge); border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,0.4);
+  }
+  .wh-title { font: 600 12px/1 var(--ui); letter-spacing: 0.18em; text-transform: uppercase; color: var(--mist); margin: 4px 0 2px; }
+  .wh-row {
+    display: grid; grid-template-columns: auto 1fr 64px 44px; grid-template-rows: auto auto; column-gap: 8px; row-gap: 2px;
+    align-items: center; text-align: left; padding: 6px 8px; border-radius: 6px; cursor: pointer;
+    background: rgba(126, 226, 246, 0.05); border: 1px solid transparent;
+  }
+  .wh-row .wh-detail { grid-column: 2 / -1; }
+  .wh-row.sel, .wh-row:hover { border-color: var(--gold); background: rgba(40, 32, 8, 0.9); }
+  .wh-name { font-weight: 600; }
+  .wh-name small { color: var(--mist); font-weight: 500; }
+  .wh-bar { height: 5px; border-radius: 3px; background: rgba(255,255,255,0.1); overflow: hidden; }
+  .wh-bar i { display: block; height: 100%; background: currentColor; }
+  .wh-row[data-tone="good"] .wh-bar { color: var(--good); }
+  .wh-row[data-tone="fair"] .wh-bar { color: var(--gold); }
+  .wh-row[data-tone="bad"] .wh-bar { color: var(--bad); }
+  .wh-back { grid-template-columns: auto 1fr; }
+  .wh-timer { height: 4px; border-radius: 2px; background: rgba(255,255,255,0.1); position: relative; margin-top: 4px; --t: 1; }
+  .wh-timer i { position: absolute; inset: 0; width: calc(var(--t) * 100%); background: var(--gold); border-radius: 2px; }
+  .wh-timer span { position: absolute; right: 0; top: 6px; font-size: 11px; color: var(--mist); }
+  body.wheel-open #hints { display: none; }
+  body.overview #floaters { visibility: hidden; }
+  body.wheel-open .pad, body.wheel-open .stick { visibility: hidden; }
+
+  /* ---------- tactics ---------- */
+  #tactics { display: grid; gap: 10px; border-top: 1px solid rgba(126, 226, 246, 0.12); padding-top: 14px; }
+  #tactics h3 { margin: 0; font: 600 12px/1 var(--ui); letter-spacing: 0.18em; text-transform: uppercase; color: var(--mist); }
+  #formation-blurb { margin: 0; font-size: 14px; color: var(--mist); }
+  #marks { display: grid; gap: 6px; }
+  .mark-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
+  .mark-row small { color: var(--mist); }
+  .mark-row select {
+    font: inherit; color: var(--foam); background: var(--deep); border: 1px solid var(--panel-edge); border-radius: 4px; padding: 5px 8px;
+  }
 
   /* ---------- interval / pause ---------- */
   .sheet {
@@ -248,8 +363,18 @@
   .pad .p-up { grid-area: 1 / 1; }
   .pad .p-down { grid-area: 2 / 1; }
   .pad .p-sprint { grid-area: 3 / 3; }
-  .pad .p-face { grid-area: 3 / 1; }
+  .pad .p-view { grid-area: 3 / 1; }
 
+  @media (max-width: 760px), (max-height: 520px) {
+    #wheel { left: 16px; right: 16px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); display: flex; justify-content: center; }
+    .wh-dial { grid-template-columns: 138px 68px 138px; gap: 5px; }
+    .wh-petal { width: 138px; min-height: 54px; padding: 6px 8px; }
+    .wh-label { font-size: 15px; }
+    .wh-hub { width: 68px; height: 68px; }
+    .wh-hub small { display: none; }
+    .wh-panel { width: min(340px, calc(100vw - 32px)); }
+    .wh-head b { font-size: 21px; }
+  }
   @media (max-width: 640px) {
     .scoreboard { left: 16px; transform: scale(0.88); transform-origin: top left; }
     #radar { width: 96px; height: 96px; }
@@ -264,6 +389,7 @@
   }
   @media (prefers-reduced-motion: reduce) {
     #callout.pop, #od-fill[data-state="full"] { animation: none; }
+    .wh-petal { transition: none; }
   }
 </style>
 </head>
@@ -275,7 +401,7 @@
     <div>
       <div class="eyebrow">Luca Stadium · Sphere Pool</div>
       <h1 id="title">Blitzball</h1>
-      <p class="lede">Six a side inside a floating sphere of water. Break tackles, thread passes past blockers and beat the keeper's grip with raw shot power.</p>
+      <p class="lede">Six a side inside a floating sphere of water. When defenders close in, time slows and you choose: thread a pass past the blockers, break the tackle, or beat the keeper's grip with raw shot power.</p>
     </div>
 
     <fieldset>
@@ -301,17 +427,17 @@
     </div>
 
     <dl class="controls-list kb-only">
-      <dt><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></dt><dd>Swim where the camera looks</dd>
+      <dt><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></dt><dd>Swim, relative to the camera</dd>
       <dt><kbd>Space</kbd><kbd>C</kbd></dt><dd>Rise and dive</dd>
-      <dt><kbd>Mouse</kbd><kbd>←→↑↓</kbd></dt><dd>Look around</dd>
-      <dt><kbd>J</kbd><kbd>Click</kbd></dt><dd>Pass to the ringed teammate, or tackle</dd>
-      <dt><kbd>K</kbd><kbd>Right-click</kbd></dt><dd>Shoot, or switch swimmer on defence</dd>
-      <dt><kbd>E</kbd></dt><dd>Jecht Shot when the meter is full</dd>
-      <dt><kbd>Shift</kbd></dt><dd>Sprint (drains HP)</dd>
-      <dt><kbd>Q</kbd><kbd>F</kbd></dt><dd>Switch swimmer · face goal or ball</dd>
-      <dt><kbd>Esc</kbd></dt><dd>Pause</dd>
+      <dt><kbd>J</kbd><kbd>Click</kbd></dt><dd>Command wheel in slow motion: pass, shoot, break, tech · tackle, hold on defence</dd>
+      <dt><kbd>1</kbd>–<kbd>4</kbd><kbd>←↑→↓</kbd></dt><dd>Pick on the wheel · <kbd>Enter</kbd> confirm · <kbd>⌫</kbd> back</dd>
+      <dt><kbd>K</kbd><kbd>E</kbd></dt><dd>Quick shot · Jecht Shot when the meter is full</dd>
+      <dt><kbd>Tab</kbd></dt><dd>Hold for the overview camera</dd>
+      <dt><kbd>Right-drag</kbd><kbd>←→↑↓</kbd></dt><dd>Nudge the camera</dd>
+      <dt><kbd>Shift</kbd><kbd>Q</kbd></dt><dd>Sprint (drains HP) · switch swimmer</dd>
+      <dt><kbd>Esc</kbd><kbd>P</kbd></dt><dd>Pause</dd>
     </dl>
-    <p class="lede touch-only">Left stick swims toward where the camera looks. Drag the view to turn. Pass, shoot and tackle from the pad on the right.</p>
+    <p class="lede touch-only">Left stick swims relative to the camera. Tap Command for the slow-motion wheel, hold View for the overview, drag the screen to nudge the camera.</p>
   </div>
 </section>
 
@@ -329,6 +455,7 @@
     <div class="card-head"><span id="card-name">10 · Tidus</span><span id="card-role">Midfield</span></div>
     <div class="meter-label"><span>HP</span><span id="hp-text">120 / 120</span></div>
     <div class="meter"><i id="hp-fill" style="width:100%"></i></div>
+    <span id="card-status"></span>
     <dl id="card-stats"></dl>
     <div class="meter-label"><span id="od-label">Jecht Shot</span></div>
     <div class="meter"><i id="od-fill" style="width:0%"></i></div>
@@ -336,17 +463,20 @@
   <div id="hints"></div>
 </div>
 
+<div id="floaters" aria-hidden="true"></div>
+<div id="wheel" hidden role="menu" aria-label="Command wheel"></div>
+
 <div id="touch" aria-hidden="true">
   <div class="stick" data-stick><div class="knob" data-knob></div></div>
   <div class="pad">
     <button type="button" class="p-special" data-action="special">Jecht</button>
     <button type="button" class="p-shoot" data-action="shoot">Shoot</button>
-    <button type="button" class="p-pass" data-action="pass">Pass<br>Tackle</button>
+    <button type="button" class="p-pass" data-action="command">Com&shy;mand</button>
     <button type="button" class="p-switch" data-action="switch">Switch</button>
     <button type="button" class="p-up" data-hold="up">Rise</button>
     <button type="button" class="p-down" data-hold="down">Dive</button>
     <button type="button" class="p-sprint" data-hold="sprint">Sprint</button>
-    <button type="button" class="p-face" data-action="face">Face</button>
+    <button type="button" class="p-view" data-hold="view">View</button>
   </div>
 </div>
 
@@ -365,6 +495,12 @@
     <h2 id="interval-title">Half time</h2>
     <div id="interval-score"></div>
     <table id="interval-stats"></table>
+    <div id="tactics" hidden>
+      <h3>Tactics for the 2nd half</h3>
+      <div class="segs" id="formation-options"></div>
+      <p id="formation-blurb"></p>
+      <div id="marks"></div>
+    </div>
     <div class="actions">
       <button class="btn primary" id="interval-go" type="button">Start 2nd half</button>
       <button class="btn" id="interval-menu" type="button">Main menu</button>

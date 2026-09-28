@@ -14,7 +14,7 @@ export class Hud {
       callout: $('#callout'), calloutMain: $('#callout .co-main'), calloutSub: $('#callout .co-sub'),
       ticker: $('#ticker'),
       cardName: $('#card-name'), cardRole: $('#card-role'), hpFill: $('#hp-fill'), hpText: $('#hp-text'),
-      stats: $('#card-stats'), odFill: $('#od-fill'), odLabel: $('#od-label'),
+      stats: $('#card-stats'), odFill: $('#od-fill'), odLabel: $('#od-label'), status: $('#card-status'),
       hints: $('#hints'),
       radar: $('#radar'),
     };
@@ -41,8 +41,9 @@ export class Hud {
     el[prop] = value;
   }
 
-  callout(main, sub = '', tone = 'neutral', seconds = 1.8) {
+  callout(main, sub = '', tone = 'neutral', seconds = 1.8, size = 'big') {
     const c = this.el.callout;
+    c.dataset.size = size;
     this.el.calloutMain.textContent = main;
     this.el.calloutSub.textContent = sub;
     c.dataset.tone = tone;
@@ -62,7 +63,7 @@ export class Hud {
     setTimeout(() => li.classList.add('old'), 4500);
   }
 
-  update(dt, m, touch) {
+  update(dt, m, touch, wheelOpen = false) {
     if (this.calloutTimer > 0) {
       this.calloutTimer -= dt;
       if (this.calloutTimer <= 0) this.el.callout.hidden = true;
@@ -89,13 +90,16 @@ export class Hud {
       this.set('hp', this.el.hpFill.style, `${hpPct}%`, 'width');
       this.set('hpt', this.el.hpText, `${Math.round(p.hp)} / ${p.maxHp}`);
       this.set('hpLow', this.el.hpFill.dataset, hpPct < 30 ? 'low' : 'ok', 'state');
+      const status = p.venom > 0 ? `Venom ${Math.ceil(p.venom)}s` : p.hold > 0 ? 'Hold' : p.burst > 0 ? 'Break' : '';
+      this.set('status', this.el.status, status);
+      this.set('statusTone', this.el.status.dataset, p.venom > 0 ? 'venom' : 'ok', 'tone');
     }
     const od = m.overdrive[m.humanTeam];
     this.set('od', this.el.odFill.style, `${Math.round(od * 100)}%`, 'width');
-    this.set('odr', this.el.odLabel, od >= 1 ? (touch ? 'Jecht Shot ready' : 'Jecht Shot ready · E') : 'Jecht Shot');
+    this.set('odr', this.el.odLabel, od >= 1 ? (touch ? 'Jecht Shot ready' : 'Jecht Shot ready · E or wheel') : 'Jecht Shot');
     this.set('odState', this.el.odFill.dataset, od >= 1 ? 'full' : 'charging', 'state');
 
-    this.set('hints', this.el.hints, hintText(m, touch), 'innerHTML');
+    this.set('hints', this.el.hints, hintText(m, touch, wheelOpen), 'innerHTML');
     this.drawRadar(m);
   }
 
@@ -160,15 +164,18 @@ function roleName(r) {
 
 function key(k) { return `<kbd>${k}</kbd>`; }
 
-function hintText(m, touch) {
+function hintText(m, touch, wheelOpen) {
   if (touch) return '';
   const p = m.human;
-  if (!p || m.phase !== 'play') return `${key('W A S D')} swim ${key('Space')}${key('C')} up/down ${key('Mouse')} look`;
+  if (wheelOpen) {
+    return `<span>${key('1')}–${key('4')} or ${key('←↑→↓')} choose</span><span>${key('Enter')}/${key('J')} confirm</span><span>${key('⌫')} back</span>`;
+  }
+  const view = `<span>${key('Tab')} overview</span>`;
+  if (!p || m.phase !== 'play') return `${key('W A S D')} swim ${key('Space')}${key('C')} up/down ${key('Tab')} overview`;
   if (m.ball.owner === p) {
-    const to = m.passTarget ? m.passTarget.name : '—';
     const odds = Math.round(m.shotOdds(p, laneCost(m, p.team, p.pos, m.attackGoal(p.team)) * 0.8) * 100);
     const special = m.overdrive[p.team] >= 1 ? `<span>${key('E')} Jecht Shot</span>` : '';
-    return `<span>${key('J')}/${key('Click')} pass → <b>${to}</b></span><span>${key('K')}/${key('R-click')} shoot <b>${odds}%</b></span>${special}<span>${key('Shift')} sprint</span>`;
+    return `<span>${key('J')}/${key('Click')} command</span><span>${key('K')} quick shot <b>${odds}%</b></span>${special}<span>${key('Shift')} sprint</span>${view}`;
   }
-  return `<span>${key('J')}/${key('Click')} tackle</span><span>${key('Q')} switch</span><span>${key('F')} face ball</span><span>${key('Shift')} sprint</span>`;
+  return `<span>${key('J')}/${key('Click')} command</span><span>${key('Q')} switch</span><span>${key('Shift')} sprint</span>${view}<span>${key('R-drag')} look</span>`;
 }
